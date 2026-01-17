@@ -15,3 +15,4 @@ resources:
   - gitea-repo.yaml
   - volsync-repo.yaml
   - snapshot-controller-repo.yaml
+  - cilium-repo.yaml
