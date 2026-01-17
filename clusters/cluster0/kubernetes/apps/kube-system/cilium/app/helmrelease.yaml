@@ -27,14 +27,14 @@ spec:
     keepHistory: false
   values:
     autoDirectNodeRoutes: true
-    bandwidthManager:
-      enabled: true
-      bbr: true
-    bpf:
-      datapathMode: netkit  # netkit can have issues with external LB traffic
-      lbExternalClusterIP: true
-      masquerade: true
-      preallocateMaps: true
+    # bandwidthManager:
+    #   enabled: true
+    #   bbr: true
+    # bpf:
+    #   datapathMode: netkit  # netkit can have issues with external LB traffic
+    #   lbExternalClusterIP: true
+    #   masquerade: true
+    #   preallocateMaps: true
     bgpControlPlane:
       enabled: true
     cgroup:
