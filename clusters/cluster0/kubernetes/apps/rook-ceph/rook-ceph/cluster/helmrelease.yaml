@@ -90,6 +90,7 @@ spec:
     ingress:
       dashboard:
         host:
+          name: rook-ceph.gregbob.net
           path: "/"
           pathType: Prefix
         ingressClassName: external
