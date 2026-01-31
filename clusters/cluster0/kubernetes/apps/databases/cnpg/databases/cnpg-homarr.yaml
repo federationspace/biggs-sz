@@ -10,7 +10,7 @@ spec:
   instances: 1
   bootstrap:
     initdb:
-      database: homarr
+      database: homarrdb
       owner: homarr
       dataChecksums: true
       secret:
