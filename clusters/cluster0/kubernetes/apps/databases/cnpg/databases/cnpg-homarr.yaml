@@ -1,20 +1,20 @@
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
-  name: cnpg-gitea
+  name: cnpg-homarr
   namespace: cnpg-system
 spec:
   # enableSuperuserAccess: true
   # superuserSecret:
-  #   name: gitea-superuser-password
+  #   name: homarr-superuser-password
   instances: 1
   bootstrap:
     initdb:
-      database: gitea
-      owner: gitea
+      database: homarr
+      owner: homarr
       dataChecksums: true
       secret:
-        name: gitea-user-password
+        name: homarr-user-password
   imageName: ghcr.io/cloudnative-pg/postgresql:18.1
   resources:
     requests:
@@ -24,5 +24,5 @@ spec:
       memory: 500Mi
       cpu: 500m
   storage:
-    size: 15Gi
+    size: 5Gi
     storageClass: ceph-block

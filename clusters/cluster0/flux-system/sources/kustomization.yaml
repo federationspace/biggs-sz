@@ -16,3 +16,5 @@ resources:
   - volsync-repo.yaml
   - snapshot-controller-repo.yaml
   - cilium-repo.yaml
+  - homarr-repo.yaml
+  
