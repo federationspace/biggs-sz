@@ -148,7 +148,7 @@ spec:
       # -- Enable ingress
       enabled: true
       # -- Ingress class name
-      ingressClassName: "external-nginx"
+      ingressClassName: "external"
       # -- Ingress annotations
       annotations: {}
         # kubernetes.io/ingress.class: nginx
