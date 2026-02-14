@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: lidarr
+  name: lidarr
+  namespace: media
+spec:
+  template:
+    metadata:
+      labels:
+        app: lidarr
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: control-00
+      containers:
+        - image: ghcr.io/hotio/lidarr:pr-plugins
+          imagePullPolicy: Always
+          name: lidarr
+          env:
+          - name: TZ
+            value: "America/Detroit"
+          - name: PUID
+            value: "1000"
+          - name: PGID
+            value: "1000"
+          ports:
+          - name: lidarr-port
+            containerPort: 8686
+            protocol: TCP
+          volumeMounts:
+          - name: lidarr-config
+            mountPath: /config
+          - name: lidarr-media
+            mountPath: /music
+          resources:
+            requests:
+              memory: 2Gi
+              cpu: 500m
+            limits:
+              memory: 2Gi
+              cpu: "2"
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      volumes:
+      - name: lidarr-config
+        persistentVolumeClaim:
+          claimName: "lidarr-config"
+      - name: lidarr-media
+        persistentVolumeClaim:
+          claimName: "media-pvc"
+  selector:
+    matchLabels:
+      app: lidarr

@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: lidarr
+  namespace: media
+spec:
+  ingressClassName: external
+  rules:
+  - host: lidarr.gregbob.net
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend: 
+          service:
+            name: lidarr-service
+            port:
+              number: 8686
