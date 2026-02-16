@@ -120,7 +120,7 @@ spec:
       # Each item must include at least a `name`, and optionally a `namespace`.
       parentRefs:
         - name: wildcard-gregbob-net
-          namespace: cert-manager
+          namespace: network
     
       # -- Hostnames this route matches (similar to ingress.hosts.host)
       hostnames:

@@ -9,7 +9,7 @@ spec:
   - jellyfin.gregbob.net
   parentRefs:
   - name: wildcard-gregbob-net
-    namespace: cert-manager
+    namespace: network
   rules:
   - backendRefs:
     - name: jellyfin-service
