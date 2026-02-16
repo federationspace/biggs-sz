@@ -2,7 +2,7 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: wildcard-gregbob-net
-  namespace: cert-manager
+  namespace: network
 spec:
   secretName: cloudflare-tls
   dnsNames:
