@@ -7,3 +7,4 @@ resources:
   # Flux-Kustomizations
   - ./ingress-nginx/ks.yaml
   - ./k8s-gateway/ks.yaml
+  - ./agentgateway/ks.yaml
