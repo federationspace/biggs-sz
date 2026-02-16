@@ -44,6 +44,7 @@ spec:
                 operator: "Exists"
   sync:
     kind: GitRepository
+    provider: github
     url: "https://github.com/federationspace/biggs-sz.git"
     ref: "refs/heads/main"
     path: "clusters/cluster0"
