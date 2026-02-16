@@ -1,0 +1,20 @@
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gregblog 
+  namespace: gregbob
+spec:
+  hostnames:
+  - gregblog.gregbob.net
+  parentRefs:
+  - name: wildcard-gregbob-net
+    namespace: cert-manager
+  rules:
+  - backendRefs:
+    - name: blog-service
+      port: 1313
+    matches:
+    - path:
+        type: PathPrefix
+        value: /

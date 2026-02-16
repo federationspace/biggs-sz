@@ -1,0 +1,20 @@
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gitea 
+  namespace: git-system
+spec:
+  hostnames:
+  - gitea.gregbob.net
+  parentRefs:
+  - name: wildcard-gregbob-net
+    namespace: cert-manager
+  rules:
+  - backendRefs:
+    - name: gitea-http
+      port: 3000
+    matches:
+    - path:
+        type: PathPrefix
+        value: /

@@ -114,17 +114,17 @@ spec:
     # -- Gateway API HTTPRoute configuration
     httproute:
       # -- Enable HTTPRoute
-      enabled: false
+      enabled: true
     
       # -- References to the parent Gateway(s) this route attaches to.
       # Each item must include at least a `name`, and optionally a `namespace`.
       parentRefs:
-        - name: my-gateway
-          namespace: default
+        - name: wildcard-gregbob-net
+          namespace: cert-manager
     
       # -- Hostnames this route matches (similar to ingress.hosts.host)
       hostnames:
-        - chart-example.local
+        - homarr.gregbob.net
     
       # -- List of routing rules.
       # Each rule can include:
@@ -142,28 +142,7 @@ spec:
           filters: []
           backendRefs:
             - name: homarr
-              port: 8080
-    
-    # Ingress configuration
-    ingress:
-      # -- Enable ingress
-      enabled: true
-      # -- Ingress class name
-      ingressClassName: "external"
-      # -- Ingress annotations
-      annotations: {}
-        # kubernetes.io/ingress.class: nginx
-      # kubernetes.io/tls-acme: "true"
-      # -- Ingress hosts configuration
-      hosts:
-        - host: homarr.gregbob.net
-          paths:
-            - path: /
-      # -- Ingress TLS configuration
-      tls: []
-      #  - secretName: chart-example-tls
-      #    hosts:
-      #      - chart-example.local
+              port: 7575
     
     # -- Resource configuration
     resources: {}

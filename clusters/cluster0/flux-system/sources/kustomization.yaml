@@ -17,4 +17,6 @@ resources:
   - snapshot-controller-repo.yaml
   - cilium-repo.yaml
   - homarr-repo.yaml
-  
+  - gateway-api-crds-git.yaml
+  - agentgateway-crds-oci.yaml
+  - agentgateway-oci.yaml

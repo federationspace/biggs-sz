@@ -25,11 +25,11 @@ spec:
       strategy: rollback
       retries: 3
   values:
-    ingress:
-      enabled: true
-      ingressClassName: "external"
-      hosts:
-        - "grafana.gregbob.net"
+    # ingress:
+    #   enabled: true
+    #   ingressClassName: "external"
+    #   hosts:
+    #     - "grafana.gregbob.net"
     deploymentStrategy:
       type: Recreate
     fullnameOverride: grafana

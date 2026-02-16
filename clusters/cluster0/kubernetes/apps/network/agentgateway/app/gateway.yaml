@@ -1,0 +1,28 @@
+---
+apiVersion: gateway.network.k8s.io/v1
+kind: Gateway
+metadata:
+  name: wildcard-gregbob-net
+  namespace: network
+spec:
+  gatewayClassName: agentgateway
+  listeners:
+  - hostname: "*.gregbob.net"
+    name: wildcard-gregbob-net-http
+    port: 80
+    protocol: HTTP
+    allowedRoutes:
+      namespaces:
+        from: All
+  - hostname: "*.gregbob.net"
+    name: wildcard-gregbob-net-https
+    port: 443
+    protocol: HTTPS
+    allowedRoutes:
+      namespaces:
+        from: All
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - kind: Secret
+        name: gregbob-net-tls

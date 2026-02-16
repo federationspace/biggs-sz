@@ -1,0 +1,20 @@
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: prowlarr
+  namespace: media
+spec:
+  hostnames:
+  - prowlarr.gregbob.net
+  parentRefs:
+  - name: wildcard-gregbob-net
+    namespace: cert-manager
+  rules:
+  - backendRefs:
+    - name: prowlarr-service
+      port: 9696
+    matches:
+    - path:
+        type: PathPrefix
+        value: /
