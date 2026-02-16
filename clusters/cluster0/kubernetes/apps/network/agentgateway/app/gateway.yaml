@@ -25,4 +25,4 @@ spec:
       mode: Terminate
       certificateRefs:
       - kind: Secret
-        name: gregbob-net-tls
+        name: wildcard-gregbob-net
