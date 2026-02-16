@@ -4,7 +4,7 @@ metadata:
   name: wildcard-gregbob-net
   namespace: network
 spec:
-  secretName: cloudflare-tls
+  secretName: wildcard-gregbob-net
   dnsNames:
   - "*.gregbob.net"
   - gregbob.net
