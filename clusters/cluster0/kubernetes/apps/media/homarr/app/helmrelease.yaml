@@ -142,7 +142,7 @@ spec:
           filters: []
           backendRefs:
             - name: homarr
-              port: 8080
+              port: 7575
     
     # -- Resource configuration
     resources: {}
@@ -164,7 +164,7 @@ spec:
       # -- Minimum replicas
       minReplicas: 1
       # -- Maximum replicas
-      maxReplicas: 100
+      maxReplicas: 1
       # -- Target CPU utilization for autoscaling
       targetCPUUtilizationPercentage: 80
       # -- Target Memory utilization for autoscaling
