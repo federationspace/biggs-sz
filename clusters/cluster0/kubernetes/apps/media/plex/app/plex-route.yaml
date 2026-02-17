@@ -1,0 +1,20 @@
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: plex
+  namespace: media
+spec:
+  hostnames:
+  - plex.gregbob.net
+  parentRefs:
+  - name: wildcard-gregbob-net
+    namespace: network
+  rules:
+  - backendRefs:
+    - name: plex-service
+      port: 32400
+    matches:
+    - path:
+        type: PathPrefix
+        value: /
