@@ -142,7 +142,7 @@ spec:
           filters: []
           backendRefs:
             - name: homarr
-              port: 8080
+              port: 7575
     
     # -- Resource configuration
     resources: {}
