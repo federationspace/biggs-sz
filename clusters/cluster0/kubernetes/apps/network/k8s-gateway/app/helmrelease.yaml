@@ -26,7 +26,7 @@ spec:
   values:
     # nodeSelector:
       # kubernetes.io/hostname: control-00
-    watchedResources: ["Ingress"]
+    watchedResources: ["HTTPRoute"]
     domain: gregbob.net
     # fallthrough:
       # enabled: true
