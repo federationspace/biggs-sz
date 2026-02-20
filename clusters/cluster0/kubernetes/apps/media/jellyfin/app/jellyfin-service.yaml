@@ -9,7 +9,7 @@ metadata:
 spec:
   selector:
     app: jellyfin
-#  externalTrafficPolicy: Local
+  externalTrafficPolicy: Local
   ports:
     - name: jellyfin
       protocol: TCP
