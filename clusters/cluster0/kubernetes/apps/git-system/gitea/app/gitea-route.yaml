@@ -6,7 +6,7 @@ metadata:
   namespace: git-system
 spec:
   hostnames:
-  - gitea.gregbob.net
+  - git.gregbob.net
   parentRefs:
   - name: wildcard-gregbob-net
     namespace: network
