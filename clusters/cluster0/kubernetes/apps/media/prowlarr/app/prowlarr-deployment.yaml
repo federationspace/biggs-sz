@@ -33,10 +33,10 @@ spec:
             mountPath: /config
           resources:
             requests:
-              memory: 1500Mi
-              cpu: 150m
+              memory: 2Gi
+              cpu: 500m
             limits:
-              memory: 3Gi
+              memory: 2Gi
               cpu: "2"
       dnsPolicy: ClusterFirst
       restartPolicy: Always

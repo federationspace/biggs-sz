@@ -35,10 +35,10 @@ spec:
             mountPath: /books
           resources:
             requests:
-              memory: 3Gi
+              memory: 2Gi
               cpu: 500m
             limits:
-              memory: 3Gi
+              memory: 2Gi
               cpu: "4"
       dnsPolicy: ClusterFirst
       restartPolicy: Always

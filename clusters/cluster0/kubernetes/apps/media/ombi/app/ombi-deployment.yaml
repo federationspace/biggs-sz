@@ -34,8 +34,8 @@ spec:
               memory: 1Gi
               cpu: 150m
             limits:
-              memory: 2Gi
-              cpu: 650m
+              memory: 1Gi
+              cpu: "2"
       dnsPolicy: ClusterFirst
       restartPolicy: Always
       volumes:

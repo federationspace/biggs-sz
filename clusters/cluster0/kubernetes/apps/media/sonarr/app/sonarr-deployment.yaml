@@ -35,11 +35,11 @@ spec:
             mountPath: /data
           resources:
             requests:
-              memory: 1500Mi
-              cpu: 150m
+              memory: 3Gi
+              cpu: 500m
             limits:
               memory: 3Gi
-              cpu: "2"
+              cpu: "4"
       dnsPolicy: ClusterFirst
       restartPolicy: Always
       volumes:

@@ -40,10 +40,10 @@ spec:
               mountPath: /scratch
           resources:
             requests:
-              memory: 100Mi
-              cpu: 50m
+              memory: 3Gi
+              cpu: 500m
             limits:
-              memory: 5Gi
+              memory: 3Gi
               cpu: "4"
       dnsPolicy: ClusterFirst
       restartPolicy: Always
