@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: landing-service
+  namespace: gregbob
+spec:
+  type: ClusterIP
+  selector:
+    app: landing
+  ports:
+    - name: landing-port
+      port: 6767
+      protocol: TCP

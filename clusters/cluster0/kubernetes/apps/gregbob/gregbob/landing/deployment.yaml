@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: landing
+  name: landing
+  namespace: gregbob
+spec:
+  template:
+    metadata:
+      labels:
+        app: landing
+    spec:
+      containers:
+        - image: szkud/gregbobnet:latest
+          imagePullPolicy: Always
+          name: landing
+          ports:
+          - name: landing-port
+            containerPort: 6767
+            protocol: TCP
+          resources:
+            requests:
+              memory: 350Mi
+              cpu: 10m
+            limits:
+              memory: 450Mi
+              cpu: 350m
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+  selector:
+    matchLabels:
+      app: landing
