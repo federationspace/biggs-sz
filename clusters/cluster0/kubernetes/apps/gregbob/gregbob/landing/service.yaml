@@ -9,5 +9,5 @@ spec:
     app: landing
   ports:
     - name: landing-port
-      port: 6767
+      port: 80
       protocol: TCP

@@ -17,7 +17,7 @@ spec:
           name: landing
           ports:
           - name: landing-port
-            containerPort: 6767
+            containerPort: 80
             protocol: TCP
           resources:
             requests:

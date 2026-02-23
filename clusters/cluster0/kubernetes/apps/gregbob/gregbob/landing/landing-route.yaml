@@ -14,7 +14,7 @@ spec:
   rules:
   - backendRefs:
     - name: landing-service
-      port: 6767
+      port: 80
     matches:
     - path:
         type: PathPrefix
