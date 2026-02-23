@@ -26,3 +26,22 @@ spec:
       certificateRefs:
       - kind: Secret
         name: wildcard-gregbob-net
+  - hostname: "gregbob.net"
+    name: gregbob-net-http
+    port: 80
+    protocol: HTTP
+    allowedRoutes:
+      namespaces:
+        from: All
+  - hostname: "gregbob.net"
+    name: gregbob-net-https
+    port: 443
+    protocol: HTTPS
+    allowedRoutes:
+      namespaces:
+        from: All
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - kind: Secret
+        name: wildcard-gregbob-net
