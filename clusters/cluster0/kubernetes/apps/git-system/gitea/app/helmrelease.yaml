@@ -456,6 +456,9 @@ spec:
           HOST: cnpg-gitea-rw.cnpg-system.svc.cluster.local
           NAME: gitea
           USER: gitea
+      # Enabling actions for Gitea       
+        actions:
+          ENABLED: true
 
       additionalConfigFromEnvs:
         - name: GITEA__database__PASSWD
