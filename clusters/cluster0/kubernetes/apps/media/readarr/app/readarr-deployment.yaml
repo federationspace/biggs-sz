@@ -14,7 +14,7 @@ spec:
       nodeSelector:
         kubernetes.io/hostname: control-00
       containers:
-        - image: ghcr.io/pennydreadful/bookshelf:softcover
+        - image: ghcr.io/pennydreadful/bookshelf:hardcover
           imagePullPolicy: Always
           name: readarr
           env:
