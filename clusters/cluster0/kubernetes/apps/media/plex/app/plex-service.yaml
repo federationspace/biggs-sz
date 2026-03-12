@@ -6,7 +6,7 @@ metadata:
 spec:
   selector:
     app: plex
-  externalTrafficPolicy: Local
+  # externalTrafficPolicy: Local # testing 20260312
   ports:
     - name: plex
       protocol: TCP
