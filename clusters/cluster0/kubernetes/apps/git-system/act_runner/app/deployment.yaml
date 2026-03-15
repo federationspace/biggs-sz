@@ -32,7 +32,7 @@ spec:
               value: "cluster0-runner"
             - name: DOCKER_HOST
               value: "tcp://localhost:2375"
-            - name: GITEA_RUNNER_CONFIG
+            - name: CONFIG_FILE
               value: "/etc/act-runner/config.yaml"
           volumeMounts:
             - name: runner-data
