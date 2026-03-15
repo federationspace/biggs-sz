@@ -16,8 +16,6 @@ spec:
       labels:
         app: act-runner
     spec:
-      nodeSelector:
-        kubernetes.io/hostname: worker-05
       containers:
         - name: act-runner
           image: gitea/act_runner:latest
@@ -33,12 +31,10 @@ spec:
             - name: GITEA_RUNNER_NAME
               value: "cluster0-runner"
             - name: DOCKER_HOST
-              value: "unix:///var/run/docker.sock"
+              value: "tcp://localhost:2375"
           volumeMounts:
             - name: runner-data
               mountPath: /data
-            - name: docker-sock
-              mountPath: /var/run/docker.sock
           resources:
             requests:
               cpu: 50m
@@ -46,12 +42,27 @@ spec:
             limits:
               cpu: 2000m
               memory: 2Gi
+        - name: docker-dind
+          image: docker:dind
+          securityContext:
+            privileged: true
+          env:
+            - name: DOCKER_TLS_CERTDIR
+              value: ""
+          volumeMounts:
+            - name: docker-data
+              mountPath: /var/lib/docker
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              cpu: 2000m
+              memory: 4Gi
       volumes:
         - name: runner-data
           persistentVolumeClaim:
             claimName: act-runner-data
-        - name: docker-sock
-          hostPath:
-            path: /var/run/docker.sock
-            type: Socket
+        - name: docker-data
+          emptyDir: {}
       restartPolicy: Always
