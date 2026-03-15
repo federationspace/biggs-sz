@@ -1,0 +1,57 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: act-runner
+  namespace: git-system
+  labels:
+    app: act-runner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: act-runner
+  template:
+    metadata:
+      labels:
+        app: act-runner
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: worker-05
+      containers:
+        - name: act-runner
+          image: gitea/act_runner:latest
+          imagePullPolicy: Always
+          env:
+            - name: GITEA_INSTANCE_URL
+              value: "https://git.gregbob.net"
+            - name: GITEA_RUNNER_REGISTRATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: act-runner-token
+                  key: token
+            - name: GITEA_RUNNER_NAME
+              value: "cluster0-runner"
+            - name: DOCKER_HOST
+              value: "unix:///var/run/docker.sock"
+          volumeMounts:
+            - name: runner-data
+              mountPath: /data
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+      volumes:
+        - name: runner-data
+          persistentVolumeClaim:
+            claimName: act-runner-data
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+            type: Socket
+      restartPolicy: Always
