@@ -2,7 +2,7 @@
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: &app act_runner
+  name: &app act-runner
   namespace: flux-system
 spec:
   targetNamespace: git-system
