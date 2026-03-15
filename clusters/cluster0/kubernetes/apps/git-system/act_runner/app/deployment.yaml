@@ -32,9 +32,13 @@ spec:
               value: "cluster0-runner"
             - name: DOCKER_HOST
               value: "tcp://localhost:2375"
+            - name: GITEA_RUNNER_CONFIG
+              value: "/etc/act-runner/config.yaml"
           volumeMounts:
             - name: runner-data
               mountPath: /data
+            - name: runner-config
+              mountPath: /etc/act-runner
           resources:
             requests:
               cpu: 50m
@@ -65,4 +69,7 @@ spec:
             claimName: act-runner-data
         - name: docker-data
           emptyDir: {}
+        - name: runner-config
+          configMap:
+            name: act-runner-config
       restartPolicy: Always
