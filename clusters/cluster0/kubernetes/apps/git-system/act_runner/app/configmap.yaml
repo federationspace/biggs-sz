@@ -16,4 +16,4 @@ data:
       fetch_timeout: 5s
       fetch_interval: 2s
     container:
-      docker_host: "-"
+      network: "host"

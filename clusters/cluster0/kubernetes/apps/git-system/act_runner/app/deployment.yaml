@@ -48,6 +48,7 @@ spec:
               memory: 2Gi
         - name: docker-dind
           image: docker:dind
+          args: ["--storage-driver=vfs"]
           securityContext:
             privileged: true
           env:
