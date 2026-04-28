@@ -18,37 +18,35 @@ spec:
           imagePullPolicy: Always
           name: readarr
           env:
-          - name: TZ
-            value: "America/Detroit"
-          - name: PUID
-            value: "1000"
-          - name: PGID
-            value: "1000"
+            - name: TZ
+              value: "America/Detroit"
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
           ports:
-          - name: readarr-port
-            containerPort: 8787
-            protocol: TCP
+            - name: readarr-port
+              containerPort: 8787
+              protocol: TCP
           volumeMounts:
-          - name: readarr-config
-            mountPath: /config
-          - name: readarr-media
-            mountPath: /books
+            - name: readarr-config
+              mountPath: /config
+            - name: readarr-media
+              mountPath: /books
           resources:
             requests:
-              memory: 3Gi
-              cpu: 500m
+              memory: 4Gi
             limits:
-              memory: 3Gi
-              cpu: "4"
+              memory: 4Gi
       dnsPolicy: ClusterFirst
       restartPolicy: Always
       volumes:
-      - name: readarr-config
-        persistentVolumeClaim:
-          claimName: "readarr-config-ceph"
-      - name: readarr-media
-        persistentVolumeClaim:
-          claimName: "media-pvc"
+        - name: readarr-config
+          persistentVolumeClaim:
+            claimName: "readarr-config-ceph"
+        - name: readarr-media
+          persistentVolumeClaim:
+            claimName: "media-pvc"
   selector:
     matchLabels:
       app: readarr
