@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: epub-only
+  namespace: epub-only
+  labels:
+    app.kubernetes.io/name: epub-only
+spec:
+  # Keep at 1 replica — scan state is held in-memory.
+  # Do NOT scale horizontally without first introducing a shared state backend
+  # (e.g. Redis, a database, or an external queue).
+  replicas: 1
+  selector:
+    matchLabels:
+      app: epub-only
+  template:
+    metadata:
+      labels:
+        app: epub-only
+        app.kubernetes.io/name: epub-only
+    spec:
+      # Allow up to 60 s for any in-progress scan decisions to finish
+      # before the pod is forcibly terminated.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: epub-only
+          # Update this to your own container registry / image tag.
+          image: shrinedogg/epub-only:v0.1.0
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          # Pull every environment variable from the ConfigMap.
+          envFrom:
+            - configMapRef:
+                name: epub-only-config
+          volumeMounts:
+            - name: ebooks
+              mountPath: /media/epub
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /api/status
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/status
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            failureThreshold: 3
+      volumes:
+        - name: ebooks
+          persistentVolumeClaim:
+            claimName: media-pvc

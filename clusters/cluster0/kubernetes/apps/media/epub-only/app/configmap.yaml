@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: epub-only-config
+  namespace: epub-only
+  labels:
+    app.kubernetes.io/name: epub-only
+    app.kubernetes.io/component: config
+data:
+  SCAN_ROOT: "/media/epub"
+  SERVER_PORT: "8080"
+  DRY_RUN: "false"
+  LOG_LEVEL: "info"

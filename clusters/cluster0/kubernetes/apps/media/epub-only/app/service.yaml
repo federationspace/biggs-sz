@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: epub-only
+  namespace: epub-only
+  labels:
+    app.kubernetes.io/name: epub-only
+spec:
+  type: ClusterIP
+  selector:
+    app: epub-only
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 8080

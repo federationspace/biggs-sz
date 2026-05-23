@@ -35,9 +35,9 @@ spec:
               mountPath: /books
           resources:
             requests:
-              memory: 4Gi
+              memory: 8Gi
             limits:
-              memory: 4Gi
+              memory: 8Gi
       dnsPolicy: ClusterFirst
       restartPolicy: Always
       volumes:
