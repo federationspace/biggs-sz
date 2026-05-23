@@ -28,7 +28,7 @@ spec:
           image: shrinedogg/epub-only:v0.1.0
           imagePullPolicy: Always
           ports:
-            - name: http
+            - name: epub-only
               containerPort: 8080
               protocol: TCP
           # Pull every environment variable from the ConfigMap.

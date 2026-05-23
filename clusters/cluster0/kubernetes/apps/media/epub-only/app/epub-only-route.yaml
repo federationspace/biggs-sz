@@ -12,7 +12,7 @@ spec:
       namespace: networking
   rules:
     - backendRefs:
-        - name: epub-only
+        - name: epub-only-service
           port: 8080
       matches:
         - path:
