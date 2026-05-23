@@ -16,6 +16,6 @@ resources:
   - ./sonarr/ks.yaml
   - ./prowlarr/ks.yaml
   - ./ombi/ks.yaml
-  - ./plex/ks.yaml 
-  - ./media-storage/ks.yaml  
-
+  - ./plex/ks.yaml
+  - ./media-storage/ks.yaml
+  - ./epub-only/ks.yaml
