@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: epub-only-config
-  namespace: epub-only
+  namespace: media
   labels:
     app.kubernetes.io/name: epub-only
     app.kubernetes.io/component: config

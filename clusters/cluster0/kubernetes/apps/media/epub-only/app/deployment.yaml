@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: epub-only
-  namespace: epub-only
+  namespace: media
   labels:
     app.kubernetes.io/name: epub-only
 spec:
