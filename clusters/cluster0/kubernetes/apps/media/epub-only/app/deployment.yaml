@@ -37,7 +37,7 @@ spec:
                 name: epub-only-config
           volumeMounts:
             - name: ebooks
-              mountPath: /media/epub
+              mountPath: /epubs
           resources:
             requests:
               cpu: 100m
