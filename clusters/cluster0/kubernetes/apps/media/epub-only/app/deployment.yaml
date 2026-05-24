@@ -25,7 +25,7 @@ spec:
       containers:
         - name: epub-only
           # Update this to your own container registry / image tag.
-          image: shrinedogg/epub-only:v0.1.0
+          image: shrinedogg/epub-only:v0.1.1
           imagePullPolicy: Always
           ports:
             - name: epub-only
