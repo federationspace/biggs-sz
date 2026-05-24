@@ -9,7 +9,7 @@ spec:
     - epub-only.gregbob.net
   parentRefs:
     - name: wildcard-gregbob-net
-      namespace: networking
+      namespace: network
   rules:
     - backendRefs:
         - name: epub-only-service
