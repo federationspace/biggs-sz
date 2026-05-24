@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/name: epub-only
     app.kubernetes.io/component: config
 data:
-  SCAN_ROOT: "/epub/tank/media/epub"
+  SCAN_ROOT: "/ebooks"
   SERVER_PORT: "8080"
   DRY_RUN: "false"
   LOG_LEVEL: "info"
