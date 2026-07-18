@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: rreading-glasses
+  name: rreading-glasses
+  namespace: media
+spec:
+  template:
+    metadata:
+      labels:
+        app: rreading-glasses
+    spec:
+      containers:
+        - image: docker.io/blampe/rreading-glasses:hardcover
+          imagePullPolicy: Always
+          name: rreading-glasses
+          command: ["/main", "serve"]
+          args:
+            - --verbose
+          env:
+            - name: POSTGRES_HOST
+              value: "cnpg-rreading-glasses-rw.cnpg-system.svc.cluster.local"
+            - name: POSTGRES_USER
+              value: "rreading-glasses"
+            - name: POSTGRES_DATABASE
+              value: "rreading-glasses"
+          envFrom:
+            - secretRef:
+                name: rreading-glasses-secret
+          ports:
+            - name: http
+              containerPort: 8788
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: 8788
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8788
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              memory: 128Mi
+            limits:
+              # The app grows an in-memory cache to fill available memory,
+              # so keep a hard limit (upstream recommendation).
+              memory: 512Mi
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+  selector:
+    matchLabels:
+      app: rreading-glasses

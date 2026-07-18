@@ -1,0 +1,25 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cnpg-rreading-glasses
+  namespace: cnpg-system
+spec:
+  instances: 1
+  bootstrap:
+    initdb:
+      database: rreading-glasses
+      owner: rreading-glasses
+      dataChecksums: true
+      secret:
+        name: rreading-glasses-user-password
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  resources:
+    requests:
+      memory: 500Mi
+      cpu: 500m
+    limits:
+      memory: 500Mi
+      cpu: 500m
+  storage:
+    size: 5Gi
+    storageClass: ceph-block

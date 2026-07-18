@@ -1,0 +1,20 @@
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: rreading-glasses
+  namespace: media
+spec:
+  hostnames:
+  - rreading-glasses.gregbob.net
+  parentRefs:
+  - name: wildcard-gregbob-net
+    namespace: network
+  rules:
+  - backendRefs:
+    - name: rreading-glasses-service
+      port: 8788
+    matches:
+    - path:
+        type: PathPrefix
+        value: /
