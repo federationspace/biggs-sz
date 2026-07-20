@@ -12,7 +12,16 @@ spec:
         app: rreading-glasses
     spec:
       containers:
-        - image: docker.io/blampe/rreading-glasses:hardcover
+        # Workaround for upstream bug: Hardcover rejects GraphQL requests with
+        # more than 5 top-level fields (HTTP 403 top_level_limit_exceeded), which
+        # rreading-glasses' batcher (hardcoded 25) trips on every batch. On the
+        # /search path the errors are silently swallowed, so Readarr sees empty
+        # results. This patched image caps the batch at 5 and makes it
+        # configurable via BATCH_SIZE. Revert to blampe/rreading-glasses:hardcover
+        # once upstream PR #575 is merged.
+        #   https://github.com/blampe/rreading-glasses/issues/574
+        #   https://github.com/blampe/rreading-glasses/pull/575
+        - image: docker.io/shrinedogg/rreading-glasses:hardcover-batch5
           imagePullPolicy: Always
           name: rreading-glasses
           command: ["/main", "serve"]
