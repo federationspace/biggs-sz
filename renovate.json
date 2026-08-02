@@ -11,7 +11,7 @@
   "dependencyDashboardTitle": "Renovate Dashboard 🤖",
   "suppressNotifications": ["prEditedNotification", "prIgnoreNotification"],
   "rebaseWhen": "conflicted",
-  "schedule": ["daily"],
+  "schedule": ["before 6am"],
   "flux": {
     "managerFilePatterns": ["/(^|/)clusters/.+\\.ya?ml$/"]
   },

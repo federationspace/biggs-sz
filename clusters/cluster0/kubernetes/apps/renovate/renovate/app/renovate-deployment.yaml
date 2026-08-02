@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: renovate
+  name: renovate
+  namespace: renovate
+spec:
+  # Single replica backed by an RWO (ceph-block) config PVC. The default
+  # RollingUpdate surges a second pod that deadlocks on a Multi-Attach error for
+  # the RWO volume; Recreate terminates the old pod first.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: renovate
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      automountServiceAccountToken: false
+      containers:
+        - image: ghcr.io/mend/renovate-ce:15.0.0
+          imagePullPolicy: Always
+          name: renovate
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: MEND_RNV_DATA_HANDLER_TYPE
+              value: postgresql
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: renovate-user-password
+                  key: password
+            - name: PGDATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: renovate-user-password
+                  key: username
+            - name: PGUSER
+              value: renovate
+            - name: PGPORT
+              value: "5432"
+            - name: PGHOST
+              value: cnpg-renovate-rw.cnpg-system.svc.cluster.local
+            - name: MEND_RNV_PLATFORM
+              value: github
+            - name: MEND_RNV_GITHUB_APP_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: renovate-github-key
+                  key: private-key
+            - name: MEND_RNV_GITHUB_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: renovate-github-secret
+                  key: app-id
+            # Read-only github.com PAT for datasource/release-notes lookups. The
+            # GitHub App installation token can't query arbitrary github.com repos
+            # and gets rate-limited, so GitRepository sources and github-* datasources
+            # are otherwise skipped with "github-token-required".
+            - name: GITHUB_COM_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: renovate-github-token
+                  key: token
+            - name: MEND_RNV_ACCEPT_TOS
+              value: "y"
+            - name: MEND_RNV_LICENSE_KEY
+              value: "eyJsaW1pdCI6IjEwIn0=.30440220457941b71ea8eb345c729031718b692169f0ce2cf020095fd328812f4d7d5bc1022022648d1a29e71d486f89f27bdc8754dfd6df0ddda64a23155000a61a105da2a1"
+          ports:
+            - name: renovate
+              containerPort: 8080
+              protocol: TCP
+          volumeMounts:
+            - name: renovate-config
+              mountPath: /config
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              memory: 250Mi
+              cpu: 100m
+            limits:
+              memory: 1Gi
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      volumes:
+        - name: renovate-config
+          persistentVolumeClaim:
+            claimName: "renovate-config"
+        # Required because the container runs with readOnlyRootFilesystem: true.
+        # Renovate writes its working data (repo clones, caches, SQLite when used)
+        # under /tmp — read-only rootfs is officially supported by renovate-ce.
+        - name: tmp
+          emptyDir: {}
+  selector:
+    matchLabels:
+      app: renovate
