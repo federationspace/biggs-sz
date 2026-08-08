@@ -448,9 +448,13 @@ spec:
         server:
           SSH_PORT: 22 # rootful image
           SSH_LISTEN_PORT: 2222 # rootless image
-      #
-      #  security:
-      #    PASSWORD_COMPLEXITY: spec
+        security:
+          PASSWORD_COMPLEXITY: spec
+        service:
+          DISABLE_REGISTRATION: true
+          REGISTER_EMAIL_CONFIRM: true
+        federation:
+          ENABLED: false
         database:
           DB_TYPE: postgres
           HOST: cnpg-gitea-rw.cnpg-system.svc.cluster.local
