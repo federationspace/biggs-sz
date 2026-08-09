@@ -21,7 +21,11 @@ spec:
         # once upstream PR #575 is merged.
         #   https://github.com/blampe/rreading-glasses/issues/574
         #   https://github.com/blampe/rreading-glasses/pull/575
-        - image: docker.io/shrinedogg/rreading-glasses:hardcover-batch5
+        # batch6 additionally persists search-path work/edition resolutions in
+        # the cache (fork PR #1) — previously every /search re-fetched all
+        # works/editions upstream through the 2s batch queue, so searches took
+        # minutes and clients timed out.
+        - image: docker.io/shrinedogg/rreading-glasses:hardcover-batch6
           imagePullPolicy: Always
           name: rreading-glasses
           command: ["/main", "serve"]
