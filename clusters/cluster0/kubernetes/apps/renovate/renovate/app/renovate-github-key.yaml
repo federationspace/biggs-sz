@@ -13,4 +13,4 @@ spec:
   - secretKey: private-key
     remoteRef:
       key: renovate-github-key
-      property: "password"
+      property: "private key"
