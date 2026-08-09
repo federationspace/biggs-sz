@@ -25,7 +25,10 @@ spec:
         # the cache (fork PR #1) — previously every /search re-fetched all
         # works/editions upstream through the 2s batch queue, so searches took
         # minutes and clients timed out.
-        - image: docker.io/shrinedogg/rreading-glasses:hardcover-batch6
+        # batch7 also marks the upstream search query itself as priority (fork
+        # PR #3) — it previously sat FIFO behind the background hydration
+        # backlog, so even fully-cached repeat searches waited ~30s.
+        - image: docker.io/shrinedogg/rreading-glasses:hardcover-batch7
           imagePullPolicy: Always
           name: rreading-glasses
           command: ["/main", "serve"]
