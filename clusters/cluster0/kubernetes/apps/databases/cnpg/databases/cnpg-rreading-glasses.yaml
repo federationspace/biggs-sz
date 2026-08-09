@@ -4,7 +4,7 @@ metadata:
   name: cnpg-rreading-glasses
   namespace: cnpg-system
 spec:
-  instances: 1
+  instances: 3
   bootstrap:
     initdb:
       database: rreading-glasses
@@ -22,4 +22,4 @@ spec:
       cpu: 500m
   storage:
     size: 5Gi
-    storageClass: ceph-block
+    storageClass: local-path
