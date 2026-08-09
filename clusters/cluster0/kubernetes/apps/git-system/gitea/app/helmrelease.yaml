@@ -449,7 +449,7 @@ spec:
           SSH_PORT: 22 # rootful image
           SSH_LISTEN_PORT: 2222 # rootless image
         security:
-          PASSWORD_COMPLEXITY: none
+          PASSWORD_COMPLEXITY: off
         service:
           DISABLE_REGISTRATION: true
           REGISTER_EMAIL_CONFIRM: true
