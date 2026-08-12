@@ -8,10 +8,10 @@ Flux CD GitOps repo for a single k3s homelab cluster (`cluster0`). All desired
 cluster state lives here as YAML; Flux reconciles it. There is no app source
 code here, only declarative infrastructure.
 
-- `clusters/cluster0/flux-system/` — Flux itself (GitRepository sources).
-- `clusters/cluster0/kubernetes/apps/<namespace>/` — applications grouped by
+- `clusters/cluster0/flux-system/`: Flux itself (GitRepository sources).
+- `clusters/cluster0/kubernetes/apps/<namespace>/`: applications grouped by
   namespace.
-- `renovate.json` — Renovate config. The flux and helm-values managers scan
+- `renovate.json`: Renovate config. The flux and helm-values managers scan
   `clusters/**.yaml`; automerge is branch-based, dashboard on GitHub Issues.
 
 ## The golden rules (read before changing anything)
