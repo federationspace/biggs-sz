@@ -1,0 +1,20 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: irc-service
+  namespace: gregbob
+  # To expose the IRC daemon directly over TCP (e.g. for irc clients), set
+  # `type: LoadBalancer` and allocate an IP from a MetalLB pool via the
+  # address-pool annotation (MetalLB IPs are a scarce resource here):
+  # annotations:
+  #   metallb.universe.tf/address-pool: "worker-01ip"
+spec:
+  selector:
+    app: irc
+  type: ClusterIP
+  ports:
+    - name: irc
+      protocol: TCP
+      port: 6667
+      targetPort: 6667
+  # type: LoadBalancer

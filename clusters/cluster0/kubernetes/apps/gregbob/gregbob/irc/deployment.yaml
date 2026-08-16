@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: irc
+  name: irc
+  namespace: gregbob
+spec:
+  # Single server: UnrealIRCd keeps all channel/global state in memory.
+  # Do NOT scale above 1 without introducing a server-link topology.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: irc
+  template:
+    metadata:
+      labels:
+        app: irc
+    spec:
+      containers:
+        - name: irc
+          image: ircd/unrealircd:latest
+          imagePullPolicy: Always
+          ports:
+            - name: irc
+              containerPort: 6667
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /ircd/unrealircd.conf
+              subPath: unrealircd.conf
+              readOnly: true
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 20m
+            limits:
+              memory: 256Mi
+              cpu: 500m
+      volumes:
+        - name: config
+          configMap:
+            name: irc-config
+      terminationGracePeriodSeconds: 30
