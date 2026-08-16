@@ -1,102 +1,144 @@
+# UnrealIRCd 6 config for irc.gregbob.net (single-server homelab network).
+# Based on the official v6 example.conf (unrealircd/unrealircd, unreal60_dev).
+#
+# The ircd/unrealircd image ships the stock include files in /ircd (its
+# WORKDIR): modules.default.conf, help/, badwords.conf, operclass.default.conf,
+# snomasks.default.conf. Includes below are relative to /ircd.
+#
+# NOTE: the cloak-keys are secret in a real deployment. This is a single
+# homelab server in a private repo; rotate them (unrealircdctl gencloak) if
+# this repo is ever made public.
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: irc-config
-  namespace: gregbob
   labels:
     app: irc
-    app.kubernetes.io/name: irc
-    app.kubernetes.io/component: config
+  name: irc-config
+  namespace: gregbob
 data:
   unrealircd.conf: |
-    # Minimal UnrealIRCd 6 config for a single-server homelab network.
-    # The IRCD listens on plaintext port 6667 (TCP).
-    #
-    # NOTE on TLS/ingress: an IRC daemon is a TCP protocol, so it cannot ride
-    # a gateway.networking.k8s.io HTTPRoute. Reach it by flipping irc-service
-    # to `type: LoadBalancer` (MetalLB) and using that IP:port 6667. The
-    # HTTPRoute in this app is for parity / a future web bridge only.
+    /* Load modules + stock config files shipped by the image (see /ircd). */
+    include "modules.default.conf";
+    include "help/help.conf";
+    include "badwords.conf";
+    include "operclass.default.conf";
+    include "snomasks.default.conf";
 
-    # Load the default cloaking module:
+    /* Cloaking (sha256, default since UnrealIRCd 5). */
     loadmodule "cloak_sha256";
 
-    # Server identity (me block):
+    /* Who we are: single server, first (and only) sid. */
     me {
-    	name "irc.gregbob.net";
-    	info "gregbob.net IRC Server";
-    	sid "001";
+        name "irc.gregbob.net";
+        info "Greg's homelab IRC server (UnrealIRCd 6)";
+        sid "001";
     }
 
-    # /ADMIN block:
     admin {
-    	"Greg";
-    	"gregbob";
-    	"greg@gregbob.net";
+        "Greg";
+        "greg";
+        "irc@gregbob.net";
     }
 
-    # Connection classes:
-    class clients
-    {
-    	pingfreq 90;
-    	maxclients 1000;
-    	sendq 200k;
-    	recvq 8000;
+    class clients {
+        pingfreq 90;
+        maxclients 1000;
+        sendq 200k;
+        recvq 8000;
     }
 
-    class opers
-    {
-    	pingfreq 90;
-    	maxclients 50;
-    	sendq 1M;
-    	recvq 8000;
+    class opers {
+        pingfreq 90;
+        maxclients 50;
+        sendq 1M;
+        recvq 8000;
     }
 
-    # Allow everyone, 3 connections per IP:
+    class servers {
+        pingfreq 60;
+        connfreq 15;
+        maxclients 10;
+        sendq 20M;
+    }
+
+    /* Allow everyone, max 3 connections per IP. */
     allow {
-    	mask *;
-    	class clients;
-    	maxperip 3;
+        mask *;
+        class clients;
+        maxperip 3;
     }
 
-    # Listen: plaintext IRC (the port the Services forward to):
+    set {
+        network-name     "GregBobNet";
+        default-server   "irc.gregbob.net";
+        services-server  "irc.gregbob.net";
+        stats-server     "irc.gregbob.net";
+
+        help-channel     "#Help";
+        prefix-quit      "Quit";
+
+        /* Shown when a user is banned (kline). */
+        kline-address    "irc@gregbob.net";
+
+        /* 3 x 80-char random strings (gencloak). Secret - see note above. */
+        cloak-keys {
+            "vZbyqrBONmgOn53ai2NO6JfihUB7mTwfU07HfvxaNlmtqhTGZN3QBIGF5Y5x3idhSWfUCSlEsCUz04Px";
+            "oJuRLKfQw2fhznqW4bjMwVGyxxvxGxhcmDBVVTc5LNBHh24sWxvF6cFLs0UoEf97vc5E8JJFicX2qmlz";
+            "SSqB1D7vxdLRyNWmkhNlosWKmXfMvQn9O6eSwnohGFTgNEyEgulSqmx36Gyb2QBhunHRWLwCDjP0PVOB";
+        }
+    }
+
+    set {
+        modes-on-connect "+ixw";
+        modes-on-oper    "+xws";
+        modes-on-join    "+nt";
+
+        maxchannelsperuser 10;
+
+        anti-spam-quit-message-time 10s;
+
+        options {
+            hide-ulines;
+            show-connect-info;
+        }
+    }
+
+    /* TLS for the :6697 listener (self-signed; see tls-secret.yaml).
+       The daemon refuses to start without at least one TLS port. */
+    set {
+        tls {
+            certificate "/ircd/tls/server.crt";
+            key "/ircd/tls/server.key";
+        }
+    }
+
+    /* Plaintext IRC on 6667. */
     listen {
-    	ip *;
-    	port 6667;
+        ip *;
+        port 6667;
     }
 
-    # Log to a file in the container's working dir (UnrealIRCd has no stdout
-    # log destination; use `kubectl exec -it <pod> -- /app/unrealircd/bin/unrealircd -r`
-    # to tail it). The image runs as `unreal`, which owns /ircd, so this is writable.
+    /* TLS on 6697. */
+    listen {
+        ip *;
+        port 6697;
+        options { tls; }
+    }
+
+    /* UnrealIRCd can only log to a file or syslog (no stdout).
+       /ircd is writable by the `unreal` user. */
     log {
-    	source {
-    		all;
-    		!debug;
-    	}
-    	destination {
-    		file "ircd.log" { maxsize 10M; }
-    	}
-    }
-
-    set {
-    	network-name 		"gregbobnet";
-    	default-server 		"irc.gregbob.net";
-    	services-server 	"irc.gregbob.net";
-    	stats-server 		"irc.gregbob.net";
-    	help-channel 		"#help";
-
-    	/* Cloak keys: regenerate with `unrealircdctl gencloak`. */
-    	cloak-keys {
-    		"r0Ca1AvIh3qMQuQuw2ddLxPDm0ci3mXRweobp8LQyjNhRoj6HDW6Z2P6LfQZ9i1rLVjvj7HoqQWAmyF2";
-    		"OJE3XCOTusNjOfsmkNIWfYZ6LZHGST280rGhCFu2JePns1Z1BGSLTgOvzwY3E0jv1NITPkUceKGp7XkP";
-    		"jjpATPYmULVhAOy5fJ0bJtH8xML1GdIjfzr41JQUhwgRgRsbgisSt40IhfWUn5wmatfHrI4Fb2lD1wkw";
-    	}
-    }
-
-    set {
-    	kline-address 'greg@gregbob.net';
-    	modes-on-connect "+ixw";
-    	modes-on-oper "+xws";
-    	modes-on-join "+nt";
-    	oper-auto-join "#opers";
-    	maxchannelsperuser 10;
+        source {
+            all;
+            !debug;
+            !join.LOCAL_CLIENT_JOIN;
+            !join.REMOTE_CLIENT_JOIN;
+            !part.LOCAL_CLIENT_PART;
+            !part.REMOTE_CLIENT_PART;
+            !kick.LOCAL_CLIENT_KICK;
+            !kick.REMOTE_CLIENT_KICK;
+        }
+        destination {
+            file "ircd.log" { maxsize 10M; }
+        }
     }

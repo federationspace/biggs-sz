@@ -17,4 +17,8 @@ spec:
       protocol: TCP
       port: 6667
       targetPort: 6667
+    - name: ircs
+      protocol: TCP
+      port: 6697
+      targetPort: 6697
   # type: LoadBalancer

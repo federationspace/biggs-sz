@@ -21,14 +21,31 @@ spec:
         - name: irc
           image: ircd/unrealircd:latest
           imagePullPolicy: Always
+          # The image's baked-in CMD is a malformed single-string JSON array
+          # ("/app/unrealircd/bin/unrealircd -F" -> exec fails: runc tries to
+          # stat "unrealircd -F" as one path, exit 128). Override it here.
+          # -F = foreground (required in a container).
+          command: ["/app/unrealircd/bin/unrealircd"]
+          args: ["-F"]
           ports:
             - name: irc
               containerPort: 6667
+              protocol: TCP
+            - name: ircs
+              containerPort: 6697
               protocol: TCP
           volumeMounts:
             - name: config
               mountPath: /ircd/unrealircd.conf
               subPath: unrealircd.conf
+              readOnly: true
+            - name: tls
+              mountPath: /ircd/tls/server.crt
+              subPath: tls.crt
+              readOnly: true
+            - name: tls
+              mountPath: /ircd/tls/server.key
+              subPath: tls.key
               readOnly: true
           resources:
             requests:
@@ -41,4 +58,7 @@ spec:
         - name: config
           configMap:
             name: irc-config
+        - name: tls
+          secret:
+            secretName: irc-tls
       terminationGracePeriodSeconds: 30
