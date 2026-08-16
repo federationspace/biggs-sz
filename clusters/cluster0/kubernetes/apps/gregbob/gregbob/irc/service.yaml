@@ -3,22 +3,32 @@ apiVersion: v1
 metadata:
   name: irc-service
   namespace: gregbob
-  # To expose the IRC daemon directly over TCP (e.g. for irc clients), set
-  # `type: LoadBalancer` and allocate an IP from a MetalLB pool via the
-  # address-pool annotation (MetalLB IPs are a scarce resource here):
-  # annotations:
-  #   metallb.universe.tf/address-pool: "worker-01ip"
 spec:
   selector:
     app: irc
-  type: ClusterIP
+  # Public exposure: the Cloudflare Tunnel (network/cloudflared) fronts
+  # irc.gregbob.net and routes it to THIS service over TCP (see the tunnel
+  # ingress: tcp://irc-service.gregbob.svc:6697). Nothing needs to be public
+  # on the node itself for that.
+  #
+  # type: LoadBalancer here allocates a private Cilium L2 VIP (192.168.2.x),
+  # the same mechanism as wildcard-gregbob-net (192.168.2.9) and
+  # k8s-gateway (192.168.2.7). That VIP is reachable from the LAN (clients on
+  # 192.168.2.x can connect to it directly, e.g. ircs://<vip>:6697) and is the
+  # stable target if the modem ever gets a direct (grey-cloud) port-forward.
+  # Note: there is NO MetalLB in this cluster; the "metallb.universe.tf"
+  # annotation approach from earlier notes does not apply.
+  type: LoadBalancer
   ports:
-    - name: irc
-      protocol: TCP
-      port: 6667
-      targetPort: 6667
     - name: ircs
       protocol: TCP
       port: 6697
       targetPort: 6697
-  # type: LoadBalancer
+      # Deterministic nodePort: a future modem port-forward can target
+      # 69.61.172.135:30697 -> any node without reading the cluster first.
+      nodePort: 30697
+    - name: irc
+      protocol: TCP
+      port: 6667
+      targetPort: 6667
+      nodePort: 30667
