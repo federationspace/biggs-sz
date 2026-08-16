@@ -1,0 +1,102 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: irc-config
+  namespace: gregbob
+  labels:
+    app: irc
+    app.kubernetes.io/name: irc
+    app.kubernetes.io/component: config
+data:
+  unrealircd.conf: |
+    # Minimal UnrealIRCd 6 config for a single-server homelab network.
+    # The IRCD listens on plaintext port 6667 (TCP).
+    #
+    # NOTE on TLS/ingress: an IRC daemon is a TCP protocol, so it cannot ride
+    # a gateway.networking.k8s.io HTTPRoute. Reach it by flipping irc-service
+    # to `type: LoadBalancer` (MetalLB) and using that IP:port 6667. The
+    # HTTPRoute in this app is for parity / a future web bridge only.
+
+    # Load the default cloaking module:
+    loadmodule "cloak_sha256";
+
+    # Server identity (me block):
+    me {
+    	name "irc.gregbob.net";
+    	info "gregbob.net IRC Server";
+    	sid "001";
+    }
+
+    # /ADMIN block:
+    admin {
+    	"Greg";
+    	"gregbob";
+    	"greg@gregbob.net";
+    }
+
+    # Connection classes:
+    class clients
+    {
+    	pingfreq 90;
+    	maxclients 1000;
+    	sendq 200k;
+    	recvq 8000;
+    }
+
+    class opers
+    {
+    	pingfreq 90;
+    	maxclients 50;
+    	sendq 1M;
+    	recvq 8000;
+    }
+
+    # Allow everyone, 3 connections per IP:
+    allow {
+    	mask *;
+    	class clients;
+    	maxperip 3;
+    }
+
+    # Listen: plaintext IRC (the port the Services forward to):
+    listen {
+    	ip *;
+    	port 6667;
+    }
+
+    # Log to a file in the container's working dir (UnrealIRCd has no stdout
+    # log destination; use `kubectl exec -it <pod> -- /app/unrealircd/bin/unrealircd -r`
+    # to tail it). The image runs as `unreal`, which owns /ircd, so this is writable.
+    log {
+    	source {
+    		all;
+    		!debug;
+    	}
+    	destination {
+    		file "ircd.log" { maxsize 10M; }
+    	}
+    }
+
+    set {
+    	network-name 		"gregbobnet";
+    	default-server 		"irc.gregbob.net";
+    	services-server 	"irc.gregbob.net";
+    	stats-server 		"irc.gregbob.net";
+    	help-channel 		"#help";
+
+    	/* Cloak keys: regenerate with `unrealircdctl gencloak`. */
+    	cloak-keys {
+    		"r0Ca1AvIh3qMQuQuw2ddLxPDm0ci3mXRweobp8LQyjNhRoj6HDW6Z2P6LfQZ9i1rLVjvj7HoqQWAmyF2";
+    		"OJE3XCOTusNjOfsmkNIWfYZ6LZHGST280rGhCFu2JePns1Z1BGSLTgOvzwY3E0jv1NITPkUceKGp7XkP";
+    		"jjpATPYmULVhAOy5fJ0bJtH8xML1GdIjfzr41JQUhwgRgRsbgisSt40IhfWUn5wmatfHrI4Fb2lD1wkw";
+    	}
+    }
+
+    set {
+    	kline-address 'greg@gregbob.net';
+    	modes-on-connect "+ixw";
+    	modes-on-oper "+xws";
+    	modes-on-join "+nt";
+    	oper-auto-join "#opers";
+    	maxchannelsperuser 10;
+    }
