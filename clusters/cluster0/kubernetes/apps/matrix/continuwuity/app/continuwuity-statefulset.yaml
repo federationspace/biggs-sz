@@ -1,0 +1,152 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: continuwuity
+  name: continuwuity
+  namespace: matrix
+spec:
+  serviceName: continuwuity-service
+  replicas: 1
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: continuwuity
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - worker-01
+      containers:
+        - image: ghcr.io/continuwuity/continuwuity:main@sha256:665bbe89280e00a6cb9ff1a978bc17c8be994701c8c33c558f3af121213ca46b
+          imagePullPolicy: Always
+          name: continuwuity
+          env:
+            - name: CONTINUWUITY_PORT
+              value: "8080"
+            - name: CONTINUWUITY_DATABASE_PATH
+              value: "/data"
+            - name: CONTINUWUITY_DATABASE_BACKUP_PATH
+              value: "/backup"
+            - name: CONTINUWUITY_DATABASE_BACKUPS_TO_KEEP
+              value: "1"
+            - name: CONTINUWUITY_ROCKSDB_PARALLELISM_THREADS
+              value: "4"
+            - name: CONTINUWUITY_QUERY_TRUSTED_KEY_SERVERS_FIRST
+              value: "false"
+            - name: CONTINUWUITY_QUERY_TRUSTED_KEY_SERVERS_FIRST_ON_JOIN
+              value: "false"
+            # - name: CONTINUWUITY_FORBIDDEN_REMOTE_SERVER_NAMES
+            #   value: |
+            #     ["matrix.org"]
+            # - name: CONTINUWUITY_FORBIDDEN_REMOTE_ROOM_DIRECTORY_SERVER_NAMES
+            #   value: |
+            #     ["matrix.org"]
+            # - name: CONTINUWUITY_URL_PREVIEW_DOMAIN_EXPLICIT_DENYLIST
+            #   value: |
+            #     ["matrix.org"]
+            - name: CONTINUWUITY_SERVER_NAME
+              value: "gregbob.net"
+            - name: CONTINUWUITY_WELL_KNOWN__CLIENT
+              value: "https://matrix.gregbob.net"
+            - name: CONTINUWUITY_WELL_KNOWN__SERVER
+              value: "matrix.gregbob.net:443"
+            - name: CONTINUWUITY_MAX_REQUEST_SIZE
+              value: "1280000000"
+            - name: CONTINUWUITY_ALLOW_REGISTRATION
+              value: "true"
+            - name: CONTINUWUITY_REGISTRATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: continuwuity-credentials
+                  key: token
+            # - name: CONTINUWUITY_EMERGENCY_PASSWORD
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: continuwuity-credentials
+            #       key: CONDUWUIT_EMERGENCY_PASSWORD
+            - name: CONTINUWUITY_ALLOW_FEDERATION
+              value: "true"
+            - name: CONTINUWUITY_ALLOW_CHECK_FOR_UPDATES
+              value: "false"
+            - name: CONTINUWUITY_ADDRESS
+              value: "0.0.0.0"
+            - name: CONTINUWUITY_NEW_USER_DISPLAYNAME_SUFFIX
+              value: ""
+            - name: ALLOW_LEGACY_MEDIA
+              value: "true"
+            # MatrixRTC / LiveKit - tells clients where to find the SFU backend.
+            # Not configured on this cluster yet: LiveKit does not run here, and
+            # there is no livekit.gregbob.net route. Enable once the SFU exists:
+            #   - name: CONTINUWUITY_MATRIX_RTC__FOCI
+            #     value: '[{ type = "livekit", livekit_service_url = "https://livekit.gregbob.net" }]'
+            #   (value MUST be TOML syntax, not JSON: figment's Env provider parses
+            #    env values as TOML; JSON stays a string and fails sequence coercion)
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: uwu-port
+              containerPort: 8080
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          volumeMounts:
+            - name: continuwuity-data
+              mountPath: /data
+            - name: continuwuity-backup
+              mountPath: /backup
+          resources:
+            limits:
+              memory: 3Gi
+            requests:
+              memory: 3Gi
+              cpu: "1.5"
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+  selector:
+    matchLabels:
+      app: continuwuity
+  volumeClaimTemplates:
+    - metadata:
+        name: continuwuity-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 100Gi
+    - metadata:
+        name: continuwuity-backup
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: ceph-block
+        resources:
+          requests:
+            storage: 100Gi
