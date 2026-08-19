@@ -55,7 +55,7 @@ spec:
             - name: assets
               mountPath: /romm/assets
             - name: library
-              mountPath: /romm/library
+              mountPath: /romm/library/roms
               subPath: tank/media/games
           resources:
             requests:
