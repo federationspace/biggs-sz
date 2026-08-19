@@ -20,5 +20,3 @@ spec:
     # ClusterSecretStore (onepassword-connect) must exist for the setup-key
     # ExternalSecret to materialise.
     - name: secretstore
-    # The management/signal/relay server it registers against.
-    - name: netbird
