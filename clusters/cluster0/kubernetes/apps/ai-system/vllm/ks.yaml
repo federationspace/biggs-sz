@@ -1,0 +1,29 @@
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app vllm
+  namespace: flux-system
+spec:
+  dependsOn:
+    # NOTE (biggs-sz port): the source repo also depends on a `nv-gpu-operator`
+    # Kustomization that advertises nvidia.com/gpu via the NVIDIA device plugin.
+    # biggs-sz has no GPU operator, so that dependsOn is removed to avoid a
+    # dangling dependency that would permanently block reconciliation. A GPU
+    # device plugin (and a node labelled nvidia.com/gpu.present=true) remains a
+    # runtime PREREQUISITE for the vLLM/embeddings/agent pods to schedule.
+    # ClusterSecretStore (onepassword-connect) must exist for the ExternalSecret.
+    - name: secretstore
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  path: ./clusters/cluster0/kubernetes/apps/ai-system/vllm/app
+  prune: false
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  interval: 3m
+  retryInterval: 1m
+  # Pulling a multi-GB model image + downloading weights on first start is slow.
+  timeout: 10m

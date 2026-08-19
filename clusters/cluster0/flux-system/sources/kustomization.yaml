@@ -20,3 +20,11 @@ resources:
   - gateway-api-crds-git.yaml
   - agentgateway-crds-oci.yaml
   - agentgateway-oci.yaml
+  # ai-system port (kagent/substrate/vLLM stack) chart sources
+  - kagent-oci.yaml
+  - kagent-crds-oci.yaml
+  - substrate-oci.yaml
+  - substrate-crds-oci.yaml
+  - cert-manager-csi-driver-oci.yaml
+  - flux-operator-mcp-oci.yaml
+  - agent-sandbox-git.yaml

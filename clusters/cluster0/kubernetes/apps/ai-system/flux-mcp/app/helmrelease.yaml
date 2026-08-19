@@ -1,0 +1,60 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: flux-operator-mcp
+  namespace: flux-system
+spec:
+  interval: 3m
+  chartRef:
+    kind: OCIRepository
+    name: flux-operator-mcp
+    namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  # Pin the flux-operator-mcp server pod to the GPU node (nv-01), matching
+  # the rest of the ai-system stack. JSON 6902 patch (op: add) targets the
+  # chart's Deployment; safe because the chart sets no nodeSelector by default.
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: Deployment
+            patch: |-
+              - op: add
+                path: /spec/template/spec/nodeSelector
+                value:
+                  nvidia.com/gpu.present: "true"
+  values:
+    # Streamable HTTP transport: matches the RemoteMCPServer protocol
+    # (STREAMABLE_HTTP) and the /mcp endpoint the kagent controller calls.
+    # The chart default is 'sse', which would expose /sse instead.
+    transport: http
+    # Read-only mode: .rules describes flux-agent as read-only
+    # ("inspection and troubleshooting ... Read-only"). Disables MCP tools
+    # that mutate cluster state.
+    readonly: true
+    # Disable the chart's bundled Kubernetes NetworkPolicy. The cluster uses
+    # Cilium for enforcement, and Cilium also honors K8s NP objects, so a
+    # chart-managed NP with empty ingress.namespaces (the default) would deny
+    # all ingress to the pod and break the ai-system -> flux-system:9090 path.
+    # The required path is already covered by the CNP
+    # 'allow-egress-to-flux-mcp' in ai-system, and flux-system has no CNPs
+    # restricting ingress, so Cilium's default allow applies.
+    networkPolicy:
+      create: false
+    rbac:
+      # Disable the chart's cluster-admin ClusterRoleBinding. The flux-operator-mcp
+      # server is a read-only diagnostic agent (readonly: true above); cluster-admin
+      # grants create/update/delete/patch/escalate cluster-wide, far beyond what a
+      # read-only, prompt-injectable LLM-driven service needs. The SA is still
+      # created (serviceAccount.create defaults to true, independent of rbac), and
+      # rbac-readonly.yaml binds it to the built-in `view` ClusterRole (read-only,
+      # no secrets/exec) plus a narrow role for Flux CRs, pods/log, and metrics.
+      create: false

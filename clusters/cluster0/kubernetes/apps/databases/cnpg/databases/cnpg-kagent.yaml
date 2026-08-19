@@ -1,0 +1,47 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cnpg-kagent
+  namespace: cnpg-system
+spec:
+  # PORT NOTE (biggs-sz): source ran instances: 3 (HA). Aligned to 1 to match
+  # biggs-sz's cnpg-tree convention (cnpg-gitea/homarr/renovate all instances:1)
+  # and avoid tripling ceph-block PVCs. Raise back to 3 for HA if desired.
+  instances: 1
+  bootstrap:
+    initdb:
+      database: kagent
+      owner: kagent
+      dataChecksums: true
+      secret:
+        name: kagent-user-password
+  # PORT NOTE (biggs-sz): pgvector here is provided via the CNPG "extension
+  # images" model (imageCatalogRef -> ../app/postgresql-minimal-trixie-catalog.yaml
+  # + spec.postgresql.extensions). That mechanism requires CNPG >= 1.29 and the
+  # Kubernetes ImageVolume feature gate. biggs-sz currently runs CNPG 1.27.1
+  # (chart cloudnative-pg 0.26.1, appVersion 1.27.1). PREREQUISITE: bump the
+  # cnpg operator to >= 1.29 (databases/cnpg/app/helmrelease.yaml) for pgvector
+  # to actually mount; otherwise kagent's vectorEnabled memory (CREATE EXTENSION
+  # vector) will fail. See the PR description for the full rationale.
+  #
+  # Minimal trixie operand + extension images from the official CNPG catalog
+  # (../app/postgresql-minimal-trixie-catalog.yaml). Enables pgvector by name only.
+  imageCatalogRef:
+    apiGroup: postgresql.cnpg.io
+    kind: ClusterImageCatalog
+    name: postgresql-minimal-trixie
+    major: 18
+  resources:
+    requests:
+      memory: 300Mi
+      cpu: 150m
+    limits:
+      memory: 300Mi
+  storage:
+    storageClass: ceph-block
+    size: 5Gi
+  postgresql:
+    extensions:
+      - name: pgvector
+    parameters:
+      archive_mode: "off"
