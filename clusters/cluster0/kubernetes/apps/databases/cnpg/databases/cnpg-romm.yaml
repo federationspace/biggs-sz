@@ -22,4 +22,4 @@ spec:
       cpu: 500m
   storage:
     size: 10Gi
-    storageClass: ceph-block
+    storageClass: local-path

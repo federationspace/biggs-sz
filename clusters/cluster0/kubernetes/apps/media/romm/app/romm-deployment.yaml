@@ -69,13 +69,13 @@ spec:
       volumes:
         - name: resources
           persistentVolumeClaim:
-            claimName: romm-resources-ceph
+            claimName: romm-resources
         - name: redis
           persistentVolumeClaim:
-            claimName: romm-redis-ceph
+            claimName: romm-redis
         - name: assets
           persistentVolumeClaim:
-            claimName: romm-assets-ceph
+            claimName: romm-assets
         - name: library
           persistentVolumeClaim:
             claimName: media-pvc
