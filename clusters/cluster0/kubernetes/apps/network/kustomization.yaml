@@ -9,4 +9,3 @@ resources:
   - ./k8s-gateway/ks.yaml
   - ./agentgateway/ks.yaml
   - ./cloudflared/ks.yaml
-  - ./netbird-client/ks.yaml
