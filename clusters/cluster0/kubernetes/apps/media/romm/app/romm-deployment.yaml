@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: romm
+  name: romm
+  namespace: media
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: romm
+  template:
+    metadata:
+      labels:
+        app: romm
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: control-00
+      containers:
+        - image: rommapp/romm:latest
+          imagePullPolicy: Always
+          name: romm
+          env:
+            - name: TZ
+              value: "America/Detroit"
+            - name: DB_HOST
+              value: "cnpg-romm-rw.cnpg-system.svc.cluster.local"
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: "romm"
+            - name: DB_USER
+              value: "romm"
+            - name: ROMM_DB_DRIVER
+              value: "postgresql"
+            - name: HASHEOUS_API_ENABLED
+              value: "true"
+            - name: SCAN_WORKERS
+              value: "2"
+            - name: WEB_SERVER_CONCURRENCY
+              value: "3"
+          envFrom:
+            - secretRef:
+                name: romm-secrets
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          volumeMounts:
+            - name: resources
+              mountPath: /romm/resources
+            - name: redis
+              mountPath: /redis-data
+            - name: assets
+              mountPath: /romm/assets
+            - name: library
+              mountPath: /romm/library
+              subPath: tank/media/games
+          resources:
+            requests:
+              memory: 1Gi
+              cpu: 500m
+            limits:
+              memory: 2Gi
+              cpu: "2"
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      volumes:
+        - name: resources
+          persistentVolumeClaim:
+            claimName: romm-resources
+        - name: redis
+          persistentVolumeClaim:
+            claimName: romm-redis
+        - name: assets
+          persistentVolumeClaim:
+            claimName: romm-assets
+        - name: library
+          persistentVolumeClaim:
+            claimName: media-pvc

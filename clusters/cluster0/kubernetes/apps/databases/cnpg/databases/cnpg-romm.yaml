@@ -1,0 +1,25 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cnpg-romm
+  namespace: cnpg-system
+spec:
+  instances: 1
+  bootstrap:
+    initdb:
+      database: romm
+      owner: romm
+      dataChecksums: true
+      secret:
+        name: romm-user-password
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  resources:
+    requests:
+      memory: 500Mi
+      cpu: 500m
+    limits:
+      memory: 500Mi
+      cpu: 500m
+  storage:
+    size: 10Gi
+    storageClass: local-path
