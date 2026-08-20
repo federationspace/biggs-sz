@@ -27,7 +27,6 @@ metadata:
 spec:
   dependsOn:
     - name: cnpg-secrets
-    - name: rook-ceph-cluster
   targetNamespace: cnpg-system
   commonMetadata:
     labels:
