@@ -7,7 +7,7 @@ spec:
   # enableSuperuserAccess: true
   # superuserSecret:
   #   name: homarr-superuser-password
-  instances: 1
+  instances: 3
   bootstrap:
     initdb:
       database: homarrdb
@@ -22,7 +22,6 @@ spec:
       cpu:  500m
     limits:
       memory: 500Mi
-      cpu: 500m
   storage:
     size: 5Gi
-    storageClass: ceph-block
+    storageClass: local-path

@@ -1,17 +1,17 @@
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
-  name: cnpg-rreading-glasses
+  name: cnpg-romm
   namespace: cnpg-system
 spec:
   instances: 3
   bootstrap:
     initdb:
-      database: rreading-glasses
-      owner: rreading-glasses
+      database: romm
+      owner: romm
       dataChecksums: true
       secret:
-        name: rreading-glasses-user-password
+        name: romm-user-password
   imageName: ghcr.io/cloudnative-pg/postgresql:18.1
   resources:
     requests:
@@ -20,5 +20,5 @@ spec:
     limits:
       memory: 500Mi
   storage:
-    size: 5Gi
+    size: 10Gi
     storageClass: local-path

@@ -4,7 +4,7 @@ metadata:
   name: cnpg-renovate
   namespace: cnpg-system
 spec:
-  instances: 1
+  instances: 3
   bootstrap:
     initdb:
       database: renovate
@@ -12,6 +12,23 @@ spec:
       dataChecksums: true
       secret:
         name: renovate-user-password
+      # Guard against the "objects owned by postgres" crashloop: renovate-ce
+      # connects as the `renovate` role (PGUSER=renovate), but if the schema is
+      # ever seeded/restored by the postgres superuser, the app role ends up
+      # with no privileges on its own tables and fails with
+      # `42501 insufficient_privilege` on task_queue / drizzle.__drizzle_migrations
+      # (the job worker can't dequeue and startup migrations abort). initdb makes
+      # renovate the DATABASE owner but NOT the owner of objects the superuser
+      # creates, so we also auto-grant it on anything postgres creates here, in
+      # any schema (incl. a future `drizzle`). Runs once, as postgres, in the
+      # `renovate` database at bootstrap. NOTE: forward-looking — only applies on
+      # a fresh (re)provision of this Cluster.
+      postInitApplicationSQL:
+        - ALTER SCHEMA public OWNER TO renovate;
+        - GRANT ALL ON SCHEMA public TO renovate;
+        - ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT ALL ON TABLES TO renovate;
+        - ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT ALL ON SEQUENCES TO renovate;
+        - ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT ALL ON FUNCTIONS TO renovate;
   imageName: ghcr.io/cloudnative-pg/postgresql:18.1
   resources:
     requests:
@@ -19,7 +36,6 @@ spec:
       cpu:  500m
     limits:
       memory: 500Mi
-      cpu: 500m
   storage:
     size: 15Gi
-    storageClass: ceph-block
+    storageClass: local-path

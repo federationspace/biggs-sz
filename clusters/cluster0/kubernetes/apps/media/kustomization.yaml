@@ -20,3 +20,4 @@ resources:
   - ./plex/ks.yaml
   - ./media-storage/ks.yaml
   - ./epub-only/ks.yaml
+  - ./romm/ks.yaml
