@@ -1,0 +1,49 @@
+---
+# SandboxConfig — tells the atelet which gVisor `runsc` binary to fetch for the
+# `gvisor` sandbox class. The WorkerPool `kagent-default` (kagent HelmRelease,
+# substrateWorkerPool) has sandboxClass=gvisor and no explicit sandboxConfigName,
+# so it resolves to this default config. Without it, ate-api-server's
+# CallAteletRestore workflow fails at sandbox-asset resolution:
+#   "no default SandboxConfig for class \"gvisor\"; set one with spec.default=true
+#    or name one via WorkerPool.spec.sandboxConfigName"
+#
+# runsc is pinned to gVisor release 20260622.0 (x86_64), sha256 verified against
+# the upstream binary (runsc.sha512 sidecar matches).
+#
+# IMPORTANT — asset URL + egress:
+#   * The atelet's asset fetcher (cmd/atelet/internal/ategcs) parses the asset
+#     URL as url.Parse(url).Host = S3 bucket, path = object key, and serves it
+#     from its configured S3 backend (ATE_STORAGE_BACKEND=s3 -> rustfs at
+#     rustfs.ai-system.svc:9000). A public https:// URL does NOT work: the host
+#     becomes the bucket name and the object is fetched from rustfs, not the
+#     public host (and the worker nodes have no public-internet egress anyway).
+#   * So runsc must be staged IN rustfs bucket `ate-snapshots`. The URL's host is
+#     the bucket name: `https://ate-snapshots/runsc` -> bucket=ate-snapshots,
+#     object=runsc, fetched from rustfs.
+#   * Staging is GitOps-managed: the runsc-upload Job (runsc-upload.yaml)
+#     downloads this pinned, SHA-256-verified binary from the upstream gVisor
+#     release and streams it into rustfs at s3://ate-snapshots/runsc. When
+#     bumping the pinned version, update VERSION + SHA in runsc-upload.yaml and
+#     runsc-cache.yaml together with the sha256 below. RustFS credentials come
+#     from the rustfs-credentials Secret (rustfs-externalsecret.yaml), not the
+#     old rustfsadmin defaults.
+apiVersion: ate.dev/v1alpha1
+kind: SandboxConfig
+metadata:
+  name: gvisor-default
+  namespace: ai-system
+spec:
+  sandboxClass: gvisor
+  default: true
+  # Required by the substrate 0.0.12 CRDs (and digest-pinned by CEL rule:
+  # changing the image invalidates actor snapshots). This is the exact image
+  # the live kagent-controller already passes in its substrate config, so
+  # existing snapshots stay restorable — do not "modernize" it to
+  # registry.k8s.io/pause without a snapshot-migration story.
+  pauseImage: gcr.io/gke-release/pause@sha256:bcbd57ba5653580ec647b16d8163cdd1112df3609129b01f912a8032e48265da
+  assets:
+    amd64:
+      runsc:
+        # host=ate-snapshots (rustfs bucket), path=runsc (object key)
+        url: https://ate-snapshots/runsc
+        sha256: f18a948bf9c8bbb54eb998549a3a8d719a1c7de2efbe8fdd2ff0ee5fecd06f19

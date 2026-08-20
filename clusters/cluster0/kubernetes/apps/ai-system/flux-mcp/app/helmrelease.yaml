@@ -1,0 +1,52 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: flux-operator-mcp
+  namespace: flux-system
+spec:
+  interval: 3m
+  chartRef:
+    kind: OCIRepository
+    name: flux-operator-mcp
+    namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    # Streamable HTTP transport: matches the RemoteMCPServer protocol
+    # (STREAMABLE_HTTP) and the /mcp endpoint the kagent controller calls.
+    # The chart default is 'sse', which would expose /sse instead.
+    transport: http
+    # Read-only mode: .rules describes flux-agent as read-only
+    # ("inspection and troubleshooting ... Read-only"). Disables MCP tools
+    # that mutate cluster state.
+    readonly: true
+    # Keep the chart's bundled Kubernetes NetworkPolicy and allow ingress from
+    # ai-system. The target FluxInstance runs with networkPolicy: true, whose
+    # generated flux-system policy selects EVERY pod and allows only
+    # same-namespace ingress plus scraping on 8080. This MCP listens on 9090 and
+    # is called from ai-system (the kagent RemoteMCPServer), so without an
+    # explicit allow that cross-namespace connection is denied. The cited
+    # 'allow-egress-to-flux-mcp' CiliumNetworkPolicy does not exist in this repo,
+    # so rely on the chart NP instead: create it and allow the ai-system
+    # namespace as an ingress source.
+    networkPolicy:
+      create: true
+      ingress:
+        namespaces:
+          - ai-system
+    rbac:
+      # Disable the chart's cluster-admin ClusterRoleBinding. The flux-operator-mcp
+      # server is a read-only diagnostic agent (readonly: true above); cluster-admin
+      # grants create/update/delete/patch/escalate cluster-wide, far beyond what a
+      # read-only, prompt-injectable LLM-driven service needs. The SA is still
+      # created (serviceAccount.create defaults to true, independent of rbac), and
+      # rbac-readonly.yaml binds it to the built-in `view` ClusterRole (read-only,
+      # no secrets/exec) plus a narrow role for Flux CRs, pods/log, and metrics.
+      create: false

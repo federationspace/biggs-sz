@@ -1,0 +1,320 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kagent
+  namespace: ai-system
+spec:
+  interval: 3m
+  chartRef:
+    kind: OCIRepository
+    name: kagent
+    namespace: flux-system
+  # Enable agent-sandbox code execution (executeCodeBlocks) on every
+  # chart-managed Agent AND de-privilege the runner pods. The chart's agent
+  # templates default to `runtime: python` but don't expose
+  # executeCodeBlocks/sandbox values, and they schedule the pod privileged;
+  # we strategic-merge both fixes onto the rendered Agent CRs here. The
+  # securityContext mirrors the static vm-agent/cilium agents (runAsNonRoot,
+  # drop ALL, privileged: false) -- without it, kagent schedules these pods
+  # privileged, too large a blast radius for executeCodeBlocks code.
+  # Egress from each sandbox is locked to in-cluster services; the vm-agent
+  # and the two static cilium agents set the same fields directly in their
+  # own manifests. A nodeSelector also pins every chart-managed agent to the
+  # GPU node (nv-01, via nvidia.com/gpu.present=true); the static
+  # vm-agent/cilium agents set the same selector in their own manifests.
+  # Post-renderer patches — only Deployment-level patches remain.
+  # The 5 chart-managed agents (k8s-agent, helm-agent, promql-agent,
+  # observability-agent, cilium-manager-agent) are now deployed as
+  # SandboxAgents on substrate (kagent/substrate-agents/) and disabled
+  # in the chart values, so no Agent patches are needed here.
+  postRenderers:
+    - kustomize:
+        patches:
+          # Pin every chart-managed Deployment (kagent-controller, kagent-ui,
+          # kagent-tools, kagent-grafana-mcp, kagent-querydoc,
+          # kagent-kmcp-controller-manager) to the GPU node (nv-01) via a JSON
+          # 6902 patch. op: add is safe: the chart's Deployments set no nodeSelector.
+          - target:
+              kind: Deployment
+            patch: |-
+              - op: add
+                path: /spec/template/spec/nodeSelector
+                value:
+                  nvidia.com/gpu.present: "true"
+          # ----------------------------------------------------------------
+          # Grafana MCP — mount the service account token so the mcp/grafana
+          # server can authenticate against Grafana. The ExternalSecret
+          # (grafana-mcp-token-externalsecret.yaml) materializes the secret from
+          # the onepassword-connect ClusterSecretStore and the env var is picked
+          # up by the container.
+          # Also add -allowed-hosts=* so the MCP server accepts requests
+          # from the kagent controller via the Service DNS (not just loopback).
+          # ----------------------------------------------------------------
+          - target:
+              kind: Deployment
+              name: kagent-grafana-mcp
+            patch: |-
+              # The chart defaults to --transport sse, but the RemoteMCPServer
+              # CR uses protocol STREAMABLE_HTTP. Override the command to use
+              # Streamable HTTP so the controller can actually connect.
+              # Also pin address to 0.0.0.0 so the pod listens on all interfaces
+              # (the chart default only sets localhost).
+              - op: replace
+                path: /spec/template/spec/containers/0/command
+                value:
+                  - /app/mcp-grafana
+                  - --transport
+                  - streamable-http
+                  - --address
+                  - 0.0.0.0:8000
+              - op: add
+                path: /spec/template/spec/containers/0/args
+                value:
+                - "-allowed-hosts=*"
+              - op: add
+                path: /spec/template/spec/containers/0/env
+                value:
+                - name: GRAFANA_SERVICE_ACCOUNT_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: kagent-grafana-mcp-token
+                      key: GRAFANA_SERVICE_ACCOUNT_TOKEN
+          # ----------------------------------------------------------------
+          # WorkerPool nodeSelector. The chart's substrate-workerpool.yaml
+          # template renders only replicas + ateomImage (substrateWorkerPool.
+          # template is ignored), so the rendered WorkerPool has NO nodeSelector
+          # and kagent-default could land on any node — breaking the node-local
+          # runsc cache (runsc-cache DaemonSet) + host-runtime assumptions.
+          # Patch spec.template.nodeSelector (the WorkerPool CRD shape is
+          # spec.template.nodeSelector, NOT spec.template.spec.nodeSelector) to
+          # pin it to the GPU node (nv-01). op: add creates spec.template first,
+          # then the nodeSelector, since the template renders neither.
+          # ----------------------------------------------------------------
+          - target:
+              group: ate.dev
+              version: v1alpha1
+              kind: WorkerPool
+            patch: |-
+              - op: add
+                path: /spec/template
+                value: {}
+              - op: add
+                path: /spec/template/nodeSelector
+                value:
+                  nvidia.com/gpu.present: "true"
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    # Override registry from chart default (cr.kagent.dev) to ghcr.io.
+    # All kagent images (controller, agent runtime, skills-init) are available
+    # at ghcr.io/kagent-dev/kagent/.* and are mirrored in the cluster's OCI
+    # source. This avoids pulling from the external cr.kagent.dev registry.
+    registry: ghcr.io
+    # ------------------------------------------------------------------
+    # Built-in agents we don't use. Disabling here (rather than
+    # `kubectl delete`) is the durable removal: the Agent CRs are owned by
+    # this HelmRelease, so Flux re-creates anything deleted out-of-band.
+    # ------------------------------------------------------------------
+    argo-rollouts-agent:
+      enabled: false
+    cilium-debug-agent:
+      enabled: false
+    cilium-policy-agent:
+      enabled: false
+    # ------------------------------------------------------------------
+    # These agents are now deployed as SandboxAgents on substrate
+    # (kagent/substrate-agents/) with Go runtime. Disable them here
+    # to avoid conflicts — the chart can only render Python Agent CRs.
+    # ------------------------------------------------------------------
+    k8s-agent:
+      enabled: false
+    helm-agent:
+      enabled: false
+    promql-agent:
+      enabled: false
+    observability-agent:
+      enabled: false
+    cilium-manager-agent:
+      enabled: false
+    istio-agent:
+      enabled: false
+    kgateway-agent:
+      enabled: false
+    # ------------------------------------------------------------------
+    # Grafana MCP subchart. The chart defaults GRAFANA_URL to
+    # `grafana.kagent:3000/api`, which is broken here on two counts: no
+    # http:// scheme, and Grafana lives in the observability namespace
+    # (Service `grafana` on port 80 -> targetPort `grafana`/3000), not a
+    # `kagent` namespace. Point it at the real Service. Egress from
+    # ai-system to observability is already allowed by the CNP
+    # `allow-egress-to-observability` (namespace-wide, any port).
+    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Grafana MCP — the apiKey is NOT stored in git (GitHub secret
+    # scanning would block the push). Instead the runtime token is
+    # injected via the post-renderer env patch from the cluster Secret
+    # kagent-grafana-mcp-token (created manually via kubectl, synced
+    # by ExternalSecret once the 1Password item exists).
+    # ------------------------------------------------------------------
+    grafana-mcp:
+      grafana:
+        url: "http://grafana.observability:80/api"
+    # ------------------------------------------------------------------
+    # kagent-tools RBAC — de-privilege the shared MCP tool server.
+    #
+    # By DEFAULT the kagent-tools subchart renders
+    # ClusterRole/kagent-tools-cluster-admin-role with apiGroups/resources/verbs
+    # [*] plus wildcard nonResourceURLs, bound to the `kagent-tools`
+    # ServiceAccount that EVERY Agent's k8s_*/helm_*/cilium_* tools call over a
+    # single shared MCP endpoint. That makes a prompt-injected agent — or any
+    # holder of the shared MCP API key — effectively cluster-admin (including
+    # secret reads and helm uninstall). Override to least privilege:
+    #
+    #   readOnly: true   -> renders the chart's read-only ClusterRole
+    #                       (get/list/watch on core/apps/batch/networking/
+    #                        autoscaling) INSTEAD of cluster-admin.
+    #   allowSecrets: false -> the read-only role gets NO access to Secrets.
+    #   namespaces: []   -> kept cluster-SCOPED (not per-namespace Roles): the
+    #                       observability/promql/cilium read tools inspect
+    #                       resources across all namespaces, so a cluster-wide
+    #                       READ surface is required; the privilege reduction is
+    #                       read-only + no-secrets, not namespace scoping.
+    #   additionalRules  -> read (get/list/watch) on the CRD groups these agents
+    #                       actually inspect (Cilium, Gateway API, Flux toolkit,
+    #                       Prometheus-operator, kagent/ate CRs), which the base
+    #                       read-only role does not cover.
+    #
+    # CONSEQUENCE (intended): the MUTATING tools exposed by the substrate
+    # agents — k8s_apply_manifest / k8s_delete_resource / k8s_patch_resource /
+    # k8s_execute_command, helm_upgrade / helm_uninstall, cilium_install /
+    # cilium_upgrade / cilium_update_service — now FAIL CLOSED at the RBAC layer.
+    # Re-enabling any of them must be done behind a SEPARATE, narrowly-scoped
+    # Role bound explicitly (a distinct authorization boundary), never by
+    # restoring the shared cluster-admin grant.
+    # ------------------------------------------------------------------
+    kagent-tools:
+      rbac:
+        create: true
+        readOnly: true
+        allowSecrets: false
+        namespaces: []
+        additionalRules:
+          # Cilium CRDs (cilium read/inspect tools)
+          - apiGroups: ["cilium.io"]
+            resources: ["*"]
+            verbs: ["get", "list", "watch"]
+          # Gateway API (route/gateway inspection)
+          - apiGroups: ["gateway.networking.k8s.io"]
+            resources: ["*"]
+            verbs: ["get", "list", "watch"]
+          # Flux toolkit (flux-agent / observability read)
+          - apiGroups:
+              - "helm.toolkit.fluxcd.io"
+              - "kustomize.toolkit.fluxcd.io"
+              - "source.toolkit.fluxcd.io"
+              - "notification.toolkit.fluxcd.io"
+            resources: ["*"]
+            verbs: ["get", "list", "watch"]
+          # Prometheus operator CRs (promql / observability agents)
+          - apiGroups: ["monitoring.coreos.com"]
+            resources: ["*"]
+            verbs: ["get", "list", "watch"]
+          # kagent + substrate CRs (self-inspection)
+          - apiGroups: ["kagent.dev", "ate.dev"]
+            resources: ["*"]
+            verbs: ["get", "list", "watch"]
+    # ------------------------------------------------------------------
+    # Default model provider -> our in-cluster vLLM (OpenAI-compatible).
+    # The chart renders a ModelConfig named "default-model-config" that
+    # the built-in agents use. Pointing it at vLLM keeps everything local.
+    # ------------------------------------------------------------------
+    providers:
+      default: openAI
+      openAI:
+        provider: OpenAI
+        # Must match vLLM's --served-model-name (not the HuggingFace weights
+        # path -- see vllm/app/deployment.yaml for why they differ).
+        model: "qwen-local"
+        apiKeySecretRef: kagent-vllm
+        apiKeySecretKey: OPENAI_API_KEY
+        config:
+          baseUrl: "http://vllm.ai-system.svc.cluster.local:8000/v1"
+    # Use the cluster's CNPG operator (cnpg-kagent) instead of the bundled
+    # dev Postgres. The full connection URL (incl. password) is provided at
+    # runtime from a mounted secret file, so no credentials live in git.
+    #
+    # vectorEnabled=true: long-term (cross-session) vector memory via pgvector.
+    # NOTE: the model's NATIVE window is 262K, but vLLM SERVES at a much smaller
+    # cap on the 24 GiB 3090 (vllm/app/deployment.yaml --max-model-len, a
+    # conservative 32768 placeholder pending a real-GPU measurement). That is
+    # tight for flux-agent's ~64K tool schemas + memory + tasks, so memory is
+    # disabled per-agent on flux-agent (flux-mcp/app/agent.yaml). The other
+    # agents have no per-agent memory block. If the maintainer raises the vLLM
+    # window after measuring, this pressure eases.
+    database:
+      postgres:
+        bundled:
+          enabled: false
+        vectorEnabled: true
+        urlFile: /etc/kagent-db/url
+    controller:
+      resources:
+        limits:
+          memory: "1024Mi"
+      volumes:
+        - name: database-url
+          secret:
+            secretName: kagent-database-url
+      volumeMounts:
+        - name: database-url
+          mountPath: /etc/kagent-db
+          readOnly: true
+      # ------------------------------------------------------------------
+      # Agent Substrate integration. Enables the substrate controller wiring
+      # so the kagent controller can schedule SandboxAgent actors on
+      # substrate workers. The substrate HelmRelease (ai-system/substrate/)
+      # deploys the substrate control plane in the same ai-system namespace.
+      # ------------------------------------------------------------------
+      substrate:
+        enabled: true
+        ateApiEndpoint: "dns:///api.ai-system.svc:443"
+        ateApiInsecure: true
+        # The chart's substrate-ate-api-rbac template binds the env-source
+        # Role/RoleBinding (secrets+configmaps:get, so ate-api-server can resolve
+        # agent KAGENT_CONFIG_JSON secretKeyRefs during CallAteletRestore) to the
+        # ate-api-server ServiceAccount in `ateApiServer.namespace`. The chart
+        # default is "ate-system" (upstream's namespace) — same hard-coding bug
+        # class as substrate/app STEP 1/2/3. We run ate-api-server in ai-system,
+        # so override here, else the RoleBinding subject points at a nonexistent
+        # ate-system SA and CallAteletRestore fails env resolution with
+        # "secrets ... is forbidden".
+        ateApiServer:
+          namespace: ai-system
+    substrateWorkerPool:
+      create: true
+      replicas: 1
+      # PINNED to the substrate control-plane version. The ateom worker image
+      # MUST move in lockstep with ate-controller/atelet/atenet-router and the
+      # digest-pinned ateapi fork above (currently all v0.0.10). v0.0.12+
+      # workers hard-require an atunnel pod-identity credential bundle at
+      # /run/podidentity.podcert.ate.dev/credential-bundle.pem (PodCertificate
+      # projection, mtls mode); the v0.0.10 jwt-mode control plane never
+      # provisions it and Talos lacks the ClusterTrustBundle/PodCertificateRequest
+      # feature gates — the worker CrashLoops with "atunnel: reading credential
+      # bundle: ... no such file or directory". Renovate bumps for the whole
+      # substrate stack are grouped + automerge:false (see renovate.json).
+      ateomImage: ghcr.io/kagent-dev/substrate/ateom-gvisor:v0.0.10
+      # NOTE: substrateWorkerPool.template is intentionally NOT set here — the
+      # kagent 0.9.12 chart's substrate-workerpool.yaml template renders ONLY
+      # `replicas` and `ateomImage`, so any `template:` value is silently
+      # dropped. The WorkerPool nodeSelector (spec.template.nodeSelector, which
+      # pins kagent-default to the GPU node for the node-local runsc cache +
+      # host runtime) is instead applied by a postRenderer patch on the rendered
+      # WorkerPool — see the postRenderers block above.

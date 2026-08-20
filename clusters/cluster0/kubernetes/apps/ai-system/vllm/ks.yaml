@@ -1,0 +1,41 @@
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app vllm
+  namespace: flux-system
+spec:
+  dependsOn:
+    # NOTE (biggs-sz port): the source repo also depends on a `nv-gpu-operator`
+    # Kustomization that advertises nvidia.com/gpu via the NVIDIA device plugin.
+    # biggs-sz has no GPU operator, so that dependsOn is removed to avoid a
+    # dangling dependency that would permanently block reconciliation. A GPU
+    # device plugin (and a node labelled nvidia.com/gpu.present=true) remains a
+    # runtime PREREQUISITE for the vLLM/embeddings/agent pods to schedule.
+    # ClusterSecretStore (onepassword-connect) must exist for the ExternalSecret.
+    - name: secretstore
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  path: ./clusters/cluster0/kubernetes/apps/ai-system/vllm/app
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  # wait: false — DECOUPLE the stack from the GPU prerequisite. Nothing in this
+  # repo installs an NVIDIA driver / device plugin / GFD labels, and no biggs-sz
+  # node currently advertises nvidia.com/gpu, so the vLLM Deployment (which
+  # requests nvidia.com/gpu: 1 and selects nvidia.com/gpu.present) cannot yet
+  # schedule. With wait: true, this Kustomization would never report Ready and
+  # would transitively block kagent and every MCP that dependsOn vllm, i.e. the
+  # whole ai-system stack. wait: false lets the manifests apply and the rest of
+  # the stack reconcile; the vLLM pod stays Pending until a GPU node exists.
+  # When a declarative GPU stack (driver + device plugin + GFD) is added, gate
+  # this behind it and/or restore wait: true. kagent's ModelConfig points here,
+  # so agents that actually call the model will error until vLLM is schedulable,
+  # but the stack itself no longer blocks on it.
+  wait: false
+  interval: 3m
+  retryInterval: 1m
+  # Pulling a multi-GB model image + downloading weights on first start is slow.
+  timeout: 10m

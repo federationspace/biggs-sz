@@ -8,7 +8,15 @@ spec:
   chart:
     spec:
       chart: cloudnative-pg
-      version: 0.26.1
+      # Bumped 0.26.1 (operator 1.27.1) -> 0.28.3 (operator 1.29.1). The kagent
+      # Cluster (databases/cnpg-kagent.yaml) uses name-only extension inheritance
+      # from a ClusterImageCatalog (spec.postgresql.extensions[].name without an
+      # inline image), which CNPG only supports from 1.29 on; the 1.27.1 Cluster
+      # CRD rejects it ("missing property 'image'"). 0.28.3 is the newest 1.29.x
+      # chart (kubeVersion >=1.29.0-0, satisfied by k3s here). PREREQUISITE for
+      # the ImageVolume-based extension mount: the target's ImageVolume feature
+      # gate must be enabled and containerd must be >= 2.1 (see cnpg-kagent.yaml).
+      version: 0.28.3
       sourceRef:
         kind: HelmRepository
         name: cloudnative-pg

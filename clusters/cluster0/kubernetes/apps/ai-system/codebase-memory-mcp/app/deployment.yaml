@@ -1,0 +1,476 @@
+---
+# Minimal dedicated identity. No cluster RBAC: the server only reads a git
+# checkout from a shared volume and writes a local SQLite index; it never
+# touches the Kubernetes API.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: codebase-memory-mcp
+  namespace: ai-system
+  labels:
+    app.kubernetes.io/name: codebase-memory-mcp
+---
+# codebase-memory-mcp — code intelligence MCP server.
+#
+# Indexes source code with tree-sitter into a persistent SQLite knowledge
+# graph (functions, classes, call chains, HTTP routes) and exposes 15
+# graph/search/query tools with semantic search via a bundled nomic-embed-code
+# embedding model. 100% local: no API keys, no external calls.
+#
+# ## Why the pod looks unusual
+#
+# The upstream image (DeusData/codebase-memory-mcp) is a *stdio-only* MCP
+# server: it has NO HTTP/SSE transport compiled in and no listening port, so
+# run directly it would start, hit stdin EOF, and exit (CrashLoopBackOff). To
+# expose it to kagent over streamable HTTP like the other MCP servers, the pod
+# wraps it in an mcp-proxy (stdio -> streamable HTTP) bridge:
+#
+#   init  cbm-assets   : copies the glibc-linked binary + its runtime libs
+#                        out of the upstream image into a shared emptyDir.
+#   init  cbm-patch    : patchelf's the staged binary's ELF INTERP + RPATH to
+#                        the staged glibc runtime (RPATH -> /opt/cbm/lib, where
+#                        the .so files are staged FLAT) so it execs natively
+#                        under musl and its `cli` indexing workers resolve libs.
+#   side  git-sync     : NATIVE SIDECAR (initContainer, restartPolicy: Always)
+#                        keeps a fresh clone of biggs-sz in /repo.
+#   init  wait-for-repo: blocks until git-sync produces the first clone.
+#   main  mcp-proxy    : spawns the patched binary and serves it at :8080/mcp.
+#
+# git-sync MUST be a native sidecar, not a regular container: Kubernetes runs
+# every initContainer to completion BEFORE starting any regular container, so
+# a regular-container git-sync would never start while wait-for-repo blocks --
+# a deadlock. As a native sidecar it starts during the init phase (before
+# wait-for-repo) and keeps running for the pod's lifetime.
+#
+# The binary is dynamically linked against glibc (libstdc++/libm/libz), but
+# mcp-proxy's image is Alpine/musl, so the binary can't run there directly.
+# The initContainers therefore copy the glibc runtime out of the upstream image
+# and patchelf the binary to use it (INTERP -> staged loader, RPATH -> staged
+# libs), so mcp-proxy can spawn it directly. Verified end-to-end locally:
+# initialize + notifications/initialized (202) + tools/list all succeed, and a
+# patched binary re-execs its `cli` indexing workers without exit 127.
+#
+# ## Why mcp-proxy (not supergateway)
+#
+# The first bridge used supercorp/supergateway, but it rejects the
+# spec-mandated `notifications/initialized` that kagent's strict MCP client
+# sends (406/400), so the RemoteMCPServer stuck at Accepted=False
+# (ReconcileFailed) even though initialize + tools/list worked. mcp-proxy
+# (official Python MCP SDK) answers the notification 202 and its session layer
+# answers initialize without a cold child spawn, so kagent registers tools
+# cleanly.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: codebase-memory-mcp
+  namespace: ai-system
+  labels:
+    app.kubernetes.io/name: codebase-memory-mcp
+    app.kubernetes.io/version: "0.9.0"
+spec:
+  # 1 replica: the SQLite index lives on a RWO host-path PVC, and the server
+  # is stateful per-graph. RollingUpdate would briefly attach two pods to the
+  # same RWO volume; Recreate avoids that.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: codebase-memory-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: codebase-memory-mcp
+        app.kubernetes.io/version: "0.9.0"
+    spec:
+      serviceAccountName: codebase-memory-mcp
+      terminationGracePeriodSeconds: 30
+      # No nodeSelector: this is a CPU-only workload. It was previously pinned
+      # to nvidia.com/gpu.present, which no biggs-sz node carries, so it was
+      # unschedulable. It needs no GPU-node locality and schedules anywhere.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - linux
+      initContainers:
+        # Extract the binary + its glibc runtime from the upstream image into
+        # the shared cbm-bin volume. Runs as root (upstream image default user
+        # is cbm/999, but we need to write the root-owned emptyDir); output is
+        # chmod 755 so the non-root main container can exec it. The shell
+        # resolves the arch triplet (aarch64-linux-gnu vs x86_64-linux-gnu).
+        - name: cbm-assets
+          image: docker.io/shrinedogg/codebase-memory-mcp:v0.10.4
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              set -eu
+              # Resolve both the shared-lib dir and the dynamic loader from
+              # ldd output — paths differ by arch (aarch64: /lib/ld-linux-
+              # aarch64.so.1 + /lib/aarch64-linux-gnu; x86_64: /lib64/ld-
+              # linux-x86-64.so.2 + /lib/x86_64-linux-gnu), so never hardcode.
+              LDD="$(ldd /usr/local/bin/codebase-memory-mcp)"
+              LIBDIR="$(echo "$LDD" | awk '/=> \//{print $3}' | xargs -n1 dirname | sort -u | head -1)"
+              LOADER="$(echo "$LDD" | awk '/ld-linux/{print $1; exit}')"
+              echo "lib dir: ${LIBDIR}  loader: ${LOADER}"
+              mkdir -p /opt/cbm/bin /opt/cbm/lib
+              cp /usr/local/bin/codebase-memory-mcp /opt/cbm/bin/
+              # cp -a "LIBDIR/." copies the CONTENTS of the lib dir FLAT into
+              # /opt/cbm/lib/ (no <triplet> subdir is created). All dependent
+              # .so files therefore live directly at /opt/cbm/lib/*.so*.
+              cp -a "${LIBDIR}/." /opt/cbm/lib/
+              # Stage the loader under a fixed arch-neutral name that the
+              # patched binary's ELF INTERP references.
+              cp -aL "${LOADER}" /opt/cbm/lib/ld-linux.so.1
+              chmod -R a+rX /opt/cbm
+              echo "staged libs (flat):"; ls -l /opt/cbm/bin /opt/cbm/lib/ld-linux.so.1
+          volumeMounts:
+            - name: cbm-bin
+              mountPath: /opt/cbm
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 2Gi
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - "ALL"
+            seccompProfile:
+              type: RuntimeDefault
+        # Make the staged glibc binary self-contained so the indexer can
+        # re-exec it. The cbm server spawns indexing worker subprocesses via
+        # `codebase-memory-mcp cli <tool>`. patchelf rewrites the binary's ELF
+        # INTERP to the staged loader and RPATH to the staged lib dir, so it
+        # execs natively under musl (no explicit-loader wrapper). CRITICAL:
+        # cbm-assets copies the libs FLAT into /opt/cbm/lib/ (no triplet
+        # subdir), so RPATH must be /opt/cbm/lib. Pointing it at a nonexistent
+        # /opt/cbm/lib/<triplet> leaves libm/libc/etc. unresolvable and the
+        # binary exits immediately (`error while loading shared libraries`),
+        # which mcp-proxy surfaces as `Connection closed` -> CrashLoopBackOff.
+        # patchelf runs in a one-shot init (apk add) -> needs HTTPS egress.
+        - name: cbm-patch
+          image: alpine:3.24
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              set -eu
+              apk add --no-cache patchelf >/dev/null
+              patchelf \
+                --set-interpreter /opt/cbm/lib/ld-linux.so.1 \
+                --set-rpath /opt/cbm/lib \
+                /opt/cbm/bin/codebase-memory-mcp
+              # v0.10.4's secure CLI coordination creates its IPC runtime dir
+              # at /tmp/cbm-daemon-<euid> and refuses to start when any
+              # ancestor is world-writable but NOT root-owned+sticky (the
+              # standard /tmp contract). A Kubernetes emptyDir mounts 0777
+              # WITHOUT the sticky bit, so cbm-index/server exit immediately
+              # with "secure CLI coordination could not be created
+              # (endpoint)". Restore the real /tmp contract on the shared
+              # volume before any cbm process runs.
+              chmod 1777 /tmp
+              # The same hardening also requires CBM_CACHE_DIR to be owned by
+              # the process euid (it then chmods 0700 itself), failing with
+              # "(cache-private)" otherwise. The local-path PVC root is
+              # root:root, and fsGroup only fixes the GROUP, which the check
+              # still rejects. Hand the cache root to the cbm uid (1000);
+              # idempotent across pod restarts.
+              chown 1000:1000 /data
+              echo "patched interp:  $(patchelf --print-interpreter /opt/cbm/bin/codebase-memory-mcp)"
+              echo "patched rpath:   $(patchelf --print-rpath /opt/cbm/bin/codebase-memory-mcp)"
+          volumeMounts:
+            - name: cbm-bin
+              mountPath: /opt/cbm
+            - name: tmp
+              mountPath: /tmp
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - "ALL"
+              add:
+                # chown(2) always requires CAP_CHOWN, even for the owner;
+                # needed to hand the root-owned PVC cache root to uid 1000.
+                # (The /tmp chmod above works cap-free because root owns it.)
+                - "CHOWN"
+            seccompProfile:
+              type: RuntimeDefault
+        # NATIVE SIDECAR: keeps a fresh shallow clone of biggs-sz at
+        # /repo/current (symlink). restartPolicy: Always makes it start during
+        # the init phase and run for the pod's lifetime. Placed BEFORE
+        # wait-for-repo so the clone appears while the wait init runs. The
+        # server indexes that path; git-sync atomically retargets the symlink
+        # on each pull, and the server's file watcher refreshes the graph.
+        # Tracks `main` -- the same branch Flux reconciles.
+        - name: git-sync
+          restartPolicy: Always
+          image: registry.k8s.io/git-sync/git-sync:v4.7.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - --repo=https://github.com/federationspace/biggs-sz.git
+            - --ref=main
+            - --depth=1
+            - --period=120s
+            - --root=/repo
+            - --link=current
+            - --max-failures=5
+          env:
+            - name: GITSYNC_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: codebase-memory-git
+                  key: username
+            - name: GITSYNC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: codebase-memory-git
+                  key: password
+          volumeMounts:
+            - name: repo
+              mountPath: /repo
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65533
+            runAsGroup: 65533
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - "ALL"
+            seccompProfile:
+              type: RuntimeDefault
+        # Wait for git-sync's first successful clone before starting the
+        # server, so the repo path exists when index_repository is first
+        # called. git-sync creates the --link symlink only after a clone.
+        - name: wait-for-repo
+          image: registry.k8s.io/git-sync/git-sync:v4.7.1
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              echo "waiting for git-sync initial clone at /repo/current ..."
+              while [ ! -e /repo/current ]; do sleep 2; done
+              echo "repo present: $(readlink /repo/current || true)"
+          volumeMounts:
+            - name: repo
+              mountPath: /repo
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65533
+            runAsGroup: 65533
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - "ALL"
+            seccompProfile:
+              type: RuntimeDefault
+        # Index (or refresh) the biggs-sz graph with a STABLE project name
+        # before mcp-proxy starts serving, so the very first MCP session sees
+        # an indexed graph. WITHOUT this the server's list_projects is empty
+        # on a fresh PVC: the upstream stdio binary has no auto-index — its
+        # file watcher only refreshes ALREADY-indexed projects, it never
+        # performs the initial index, so the system prompt's "auto-synced /
+        # graph refreshes in the background" claim was effectively unimplemented
+        # for first use. Re-runs on every pod start, which also keeps the graph
+        # fresh despite git-sync rotating the /repo/current symlink to a new
+        # .worktrees/<hash> worktree on each pull (the watcher can't follow
+        # that retarget). Idempotent + ~3s for this repo, so startup cost is
+        # negligible. --name biggs-sz fixes the project identity across
+        # re-indexes; otherwise the server derives the name from the resolved
+        # symlink target (repo-.worktrees-<sha>), orphaning a NEW project per
+        # commit and defeating the watcher entirely. The patched binary (INTERP
+        # -> staged loader, RPATH -> /opt/cbm/lib) execs natively under musl,
+        # same as the server's child workers.
+        - name: cbm-index
+          image: docker.io/shrinedogg/codebase-memory-mcp:v0.10.4
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-ec"]
+          args:
+            - >-
+              /opt/cbm/bin/codebase-memory-mcp cli index_repository
+              --repo-path /repo/current --mode full --name biggs-sz
+          env:
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: CBM_CACHE_DIR
+              value: /data
+            - name: CBM_ALLOWED_ROOT
+              value: /repo
+            - name: CBM_MEM_BUDGET_MB
+              value: "1024"
+            - name: CBM_WORKERS
+              value: "2"
+            - name: CBM_LOG_LEVEL
+              value: info
+          volumeMounts:
+            - name: cbm-bin
+              mountPath: /opt/cbm
+              readOnly: true
+            - name: repo
+              mountPath: /repo
+              readOnly: true
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 4Gi
+          securityContext:
+            runAsNonRoot: true
+            # Match the server's uid so DB files written here (1000:1000) are
+            # read/write by both; the PVC dir is 0777 either way.
+            runAsUser: 1000
+            runAsGroup: 1000
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - "ALL"
+            seccompProfile:
+              type: RuntimeDefault
+      containers:
+        # stdio -> streamable HTTP bridge. Spawns the cbm binary through the
+        # copied glibc loader and serves it at /mcp. This is the only network
+        # endpoint; the cbm binary itself listens on nothing.
+        - name: server
+          image: ghcr.io/sparfenyuk/mcp-proxy:v0.12.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - --host=0.0.0.0
+            - --port=8080
+            - --transport=streamablehttp
+            - --pass-environment
+            - --
+            # The binary is patchelf'd (INTERP -> staged loader, RPATH ->
+            # /opt/cbm/lib, where the libs are staged FLAT), so it execs
+            # natively under musl and its `cli` indexing workers resolve libs
+            # via RPATH. No explicit loader wrapper needed.
+            - /opt/cbm/bin/codebase-memory-mcp
+          env:
+            # Don't write .pyc bytecode next to site-packages (root FS is
+            # read-only); Python would otherwise try and fail noisily.
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            # Point the SQLite graph DBs + config at the PVC.
+            - name: CBM_CACHE_DIR
+              value: /data
+            # Only allow indexing under the mounted checkout. To add repos,
+            # add more git-sync roots and widen this (colon-separated).
+            - name: CBM_ALLOWED_ROOT
+              value: /repo
+            # Keep the RAM-first indexing budget below the memory limit and
+            # bound indexing parallelism to the requested CPUs (the binary is
+            # cgroup-aware but conservative settings avoid OOM on big repos).
+            - name: CBM_MEM_BUDGET_MB
+              value: "1024"
+            - name: CBM_WORKERS
+              value: "2"
+            - name: CBM_LOG_LEVEL
+              value: info
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          # TCP probe: mcp-proxy's session layer binds the listener as soon as
+          # it starts; the cbm child is spawned lazily per session. A TCP
+          # connect succeeds the moment the bridge is serving.
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              # Headroom for the 293MB binary (embedded grammars + embedding
+              # model are mmap'd) plus in-memory indexing. CBM_MEM_BUDGET_MB
+              # caps the indexing budget well below this.
+              memory: 4Gi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - "ALL"
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: cbm-bin
+              mountPath: /opt/cbm
+              readOnly: true
+            - name: repo
+              mountPath: /repo
+              readOnly: true
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        # Staged binary + glibc runtime, populated by the cbm-assets init.
+        - name: cbm-bin
+          emptyDir:
+            sizeLimit: 600Mi
+        # The git checkout shared between git-sync (RW) and the server (RO).
+        - name: repo
+          emptyDir: {}
+        # SQLite knowledge graph (persistent).
+        - name: data
+          persistentVolumeClaim:
+            claimName: codebase-memory-data
+        - name: tmp
+          emptyDir:
+            sizeLimit: 100Mi

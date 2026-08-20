@@ -1,0 +1,44 @@
+---
+# LAN-only HTTPS route for the kagent MCP server (kagent-controller:8083/mcp).
+#
+# Mirrors the ersatz pattern: parented to the INTERNAL gateway
+# (wildcard-gregbob-net, VIP 192.168.6.15), which the UDM does NOT WAN-forward
+# (only the public gateway .6.7:80/443 is forwarded). So:
+#   - LAN/VPN clients: k8s-gateway split-horizon answers mcp.gregbob.net with
+#     .6.15 -> this route -> kagent MCP. TLS terminated here with the wildcard
+#     *.biggs.dog cert, so clients use https://mcp.gregbob.net/mcp.
+#   - WAN clients: public DNS -> Cloudflare -> public gateway (.6.7), which has
+#     no mcp.gregbob.net route -> 404. LAN-only reachability is the access control
+#     (no auth on the MCP path).
+#
+# Match is scoped to /mcp (NOT "/"): the kagent-controller REST API lives on
+# the SAME port 8083 (the rendered UI nginx proxies /api/ to this backend), so
+# a "/" match would let any holder of the shared MCP API key drive the full
+# controller API. Scoping to /mcp exposes only the MCP endpoint; every other
+# path has no matching rule and is denied at the gateway. No path rewrite and
+# no filters: the backend serves Streamable-HTTP at /mcp and we pass it
+# straight through to the untagged (plain-HTTP) kagent-controller backend. Do
+# NOT give this backend appProtocol: mcp -- that switches agentgateway into its
+# native MCP-proxy mode and re-mangles the path; we want raw HTTP passthrough.
+#
+# This is the sole MCP entry point. Editor MCP clients should use
+# https://mcp.gregbob.net/mcp.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: kagent-mcp
+  namespace: ai-system
+spec:
+  hostnames:
+    - mcp.gregbob.net
+  parentRefs:
+    - name: wildcard-gregbob-net
+      namespace: network
+  rules:
+    - backendRefs:
+        - name: kagent-controller
+          port: 8083
+      matches:
+        - path:
+            type: PathPrefix
+            value: /mcp
