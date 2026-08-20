@@ -19,7 +19,6 @@ spec:
       cpu:  500m
     limits:
       memory: 500Mi
-      cpu: 500m
   storage:
     size: 15Gi
     storageClass: local-path

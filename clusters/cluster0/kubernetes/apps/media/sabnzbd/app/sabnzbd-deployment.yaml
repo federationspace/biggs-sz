@@ -44,7 +44,6 @@ spec:
               cpu: 500m
             limits:
               memory: 3Gi
-              cpu: "4"
       dnsPolicy: ClusterFirst
       restartPolicy: Always
       volumes:
