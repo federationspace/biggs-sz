@@ -1,8 +1,10 @@
-# Biggs was my dog.
+# Biggs is [Joe](https://github.com/shrinedogg)'s dog.
 
-He was the best boy, and when I found out I could buy a domain with `.dog` as
-the extension, I migrated my homelab services to `biggs.dog` (and its sibling
-`gregbob.net`) to honor him.
+He's a good boy. Joe's own homelab repo, [`biggs.dog`](https://github.com/shrinedogg/biggs.dog),
+was the starting point I used to build up my Kubernetes and home-server
+skills — this repo grew out of that base. As the cluster became mine, I
+registered `gregbob.net` to host the services and sites I've since built on
+top of it.
 
 # What is this?
 
