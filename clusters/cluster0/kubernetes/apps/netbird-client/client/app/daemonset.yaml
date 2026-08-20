@@ -1,11 +1,23 @@
 # NetBird client as a privileged hostNetwork DaemonSet.
 #
-# cluster0 is a single-node UpCloud managed cluster, so this is one pod that:
-#   1. registers as a NetBird peer against the in-cluster management server
-#      (Service netbird-server.netbird on :80), and
-#   2. acts as a NetBird NETWORK ROUTER, publishing cluster0's pod/service CIDRs
-#      to the mesh so other peers (the cluster1 node client, road-warriors) can
-#      reach cluster0 services through this node.
+# cluster0 (biggs-sz) is a 4-node cluster. This DaemonSet puts one pod per
+# node that:
+#   1. registers as a NetBird peer against the NetBird SERVER running in the
+#      biggs.dog cluster0 (public endpoint https://netbird.biggs.dog), and
+#   2. acts as a NetBird NETWORK ROUTER, publishing cluster0's pod/service
+#      CIDRs to the mesh so other peers can reach cluster0 services through
+#      these nodes.
+#
+# === Management URL: public, NOT in-cluster ===
+# The netbird server does NOT run in this cluster. It runs in the biggs.dog
+# cluster0 (repo ~/Code/biggs.dog, apps/netbird), exposed via agentgateway at
+# https://netbird.biggs.dog. An earlier revision pointed NB_MANAGEMENT_URL at
+# netbird-server.netbird.svc.cluster.local, a Service DNS name that only
+# resolves INSIDE the biggs.dog cluster; here CoreDNS answered NXDOMAIN and
+# every pod crash-looped with "failed creating connection to Management
+# Service". Management/signal gRPC is routed through that same public hostname
+# (h2c HTTPRoute with 24h stream timeouts in the biggs.dog repo), and the
+# certificate is publicly valid, so the plain public URL is correct here.
 #
 # === Why privileged + hostNetwork (and why NOT in the `netbird` namespace) ===
 # The `netbird` namespace is PSA `baseline` -- correct for the unprivileged
@@ -104,12 +116,12 @@ spec:
           args: ["up", "--foreground-mode"]
           env:
             - name: NB_MANAGEMENT_URL
-              # In-cluster combined server (management REST+gRPC, signal, relay
-              # on :80). Avoids hairpinning the control channel through the
-              # public gateway. Signal/relay/STUN are advertised by the server
-              # as the public netbird.biggs.dog host, so those still egress over
-              # the node's public IP (the node owns 87.58.147.51, so it works).
-              value: "http://netbird-server.netbird.svc.cluster.local:80"
+              # Public endpoint of the netbird server in the biggs.dog cluster.
+              # Management/signal gRPC and relay all work over this hostname
+              # (agentgateway terminates TLS, h2c to the pod; see apps/netbird
+              # in the biggs.dog repo). The node egresses via its public IP,
+              # which the server side allows. NB_ADMIN_URL below matches.
+              value: "https://netbird.biggs.dog"
             - name: NB_ADMIN_URL
               value: "https://netbird.biggs.dog"
             - name: NB_SETUP_KEY
