@@ -39,74 +39,127 @@ worth much anyway, so that's stickiness I can live with.
 
 - Single k3s control plane node: `control-00` (the NAS, see above).
 - Worker nodes: `worker-00`, `worker-01`, `worker-05`.
-- Storage classes:
-  - `local-path` — default, k3s built-in, node-local SSD.
-  - `ceph-block` — [Rook-Ceph](https://rook.io/), for workloads that need
-    replicated block storage independent of any one node.
-  - `nfs` — external NFS share, for shared/media volumes.
-- Media apps that need Intel iGPU hardware transcoding (`jellyfin`, etc.)
-  are pinned via `kubernetes.io/hostname` nodeSelectors to the workers that
-  have the iGPU (see `intel-gpu-plugin` / `nfd` in `kube-system`).
-- Networking: [Cilium](https://cilium.io/) provides the CNI, and
-  `CiliumLoadBalancerIPPool` + BGP advertisement (in
-  `kube-system/cilium/bgp/`) hand out `LoadBalancer` service IPs from the
-  `192.168.2.0/24` range via L2/BGP — **not** MetalLB (a MetalLB Helm
-  repository source still exists in `flux-system/sources` but is currently
-  unused/legacy).
-- Ingress/exposure (`network/` namespace):
-  - `k8s-gateway` — Gateway API implementation; HTTPRoutes reference the
-    shared Gateway `wildcard-gregbob-net` in the `network` namespace by name.
-  - `cloudflared` — Cloudflare Tunnel, terminating `*.gregbob.net` (+ apex)
-    proxied traffic and forwarding HTTP-only to
-    `wildcard-gregbob-net.network.svc:80` inside the cluster. There is no
-    port-forwarded ingress from the internet other than SSH; everything
-    public rides the tunnel.
-  - `agentgateway` — gateway for AI/agent-facing traffic.
-- Secrets: [External Secrets Operator](https://external-secrets.io/) synced
-  from a 1Password vault via `onepassword-connect`
-  (`ClusterSecretStore: onepassword-connect`). Nothing is hardcoded in Git.
-- Certificates: cert-manager with a `letsencrypt-prod` `ClusterIssuer` using
-  Cloudflare DNS-01 challenges.
+- Note: `CiliumLoadBalancerIPPool` + BGP handles `LoadBalancer` IPs —
+  **not** MetalLB (a MetalLB Helm repository source still exists in
+  `flux-system/sources` but is currently unused/legacy).
 
-## Applications by namespace
+See **Core components** below for storage, networking, secrets, and
+certificate details.
 
-| Namespace | Apps |
+## Repository structure
+
+```
+clusters/cluster0/
+├── flux-system/                # FluxInstance + Helm/OCI/Git repository sources
+└── kubernetes/apps/
+    ├── ai-system/               # agent-sandbox, codebase-memory-mcp, csi-driver, embeddings,
+    │                            # exa-mcp, flux-mcp, kagent(-crds), mindwtr-mcp, substrate(-crds),
+    │                            # victoria-metrics-mcp, vllm
+    ├── cert-manager/            # cert-manager (ACME/DNS-01 issuers)
+    ├── databases/                # cnpg (CloudNativePG)
+    ├── external-secrets/         # external-secrets, onepassword-connect
+    ├── git-system/                # gitea, act_runner
+    ├── gregbob/                   # gregbob — personal site/services + IRC
+    ├── kube-system/                # cilium (CNI + BGP/L2), nfs, nfd, intel-gpu-plugin,
+    │                              # volsync, snapshot-controller
+    ├── matrix/                    # continuwuity, sable
+    ├── media/                     # jellyfin, plex, sonarr, radarr, lidarr, readarr, prowlarr,
+    │                             # sabnzbd, ombi, homarr, romm, rreading-glasses, epub-only,
+    │                             # media-storage
+    ├── netbird-client/            # client — NetBird mesh VPN agent
+    ├── network/                   # agentgateway, k8s-gateway, cloudflared
+    ├── observability/             # victoria-metrics, victoria-logs, grafana-operator
+    ├── renovate/                  # renovate — self-hosted, keeps chart/image pins current
+    └── rook-ceph/                 # rook-ceph — Ceph operator + cluster, backs `ceph-block` SC
+```
+
+## Core components
+
+### Networking
+
+| Component | Description |
 |---|---|
-| `ai-system` | vllm, kagent, substrate, embeddings, exa-mcp, flux-mcp, victoria-metrics-mcp, mindwtr-mcp, codebase-memory-mcp, agent-sandbox, csi-driver |
-| `cert-manager` | cert-manager |
-| `databases` | cnpg (CloudNativePG) |
-| `external-secrets` | external-secrets, onepassword-connect |
-| `git-system` | gitea, act_runner |
-| `gregbob` | gregbob (personal site/services + IRC) |
-| `kube-system` | cilium, nfs, nfd, intel-gpu-plugin, volsync, snapshot-controller |
-| `matrix` | continuwuity, sable |
-| `media` | jellyfin, plex, sonarr, radarr, lidarr, readarr, prowlarr, sabnzbd, ombi, homarr, romm, rreading-glasses, epub-only, media-storage |
-| `netbird-client` | client (NetBird mesh VPN agent) |
-| `network` | agentgateway, k8s-gateway, cloudflared |
-| `observability` | victoria-metrics, victoria-logs, grafana-operator |
-| `renovate` | renovate (self-hosted, keeps chart/image pins current) |
-| `rook-ceph` | rook-ceph (Ceph operator + cluster, backs `ceph-block` SC) |
+| [Cilium](https://cilium.io/) | CNI; `CiliumLoadBalancerIPPool` + BGP advertisement (`kube-system/cilium/bgp/`) hand out `LoadBalancer` IPs from `192.168.2.0/24` |
+| [k8s-gateway](https://github.com/ori-edge/k8s_gateway) | Gateway API implementation; HTTPRoutes attach to the shared Gateway `wildcard-gregbob-net` in `network` by name |
+| [cloudflared](https://github.com/cloudflare/cloudflared) | Cloudflare Tunnel; terminates proxied `*.gregbob.net` (+ apex) traffic and forwards HTTP-only to `wildcard-gregbob-net.network.svc:80` — no other internet-facing ingress besides SSH |
+| agentgateway | Gateway for AI/agent-facing traffic |
 
-## Repo conventions
+### Identity & secrets
+
+| Component | Description |
+|---|---|
+| [External Secrets Operator](https://external-secrets.io/) | Syncs secrets from 1Password into the cluster via a `ClusterSecretStore` |
+| onepassword-connect | 1Password Connect server; backs the `onepassword-connect` `ClusterSecretStore`, vault `biggs-sz` |
+| [cert-manager](https://cert-manager.io/) | `letsencrypt-prod` `ClusterIssuer` via Cloudflare DNS-01 |
+
+### Storage
+
+| Component | Description |
+|---|---|
+| `local-path` | k3s built-in, default StorageClass, node-local SSD |
+| [Rook-Ceph](https://rook.io/) | `ceph-block` StorageClass; replicated block storage independent of any one node |
+| NFS | external NFS share, `nfs` StorageClass, shared/media volumes |
+| [volsync](https://volsync.readthedocs.io/) | volume backup/replication (`kube-system`) |
+
+### System
+
+| Component | Description |
+|---|---|
+| [Node Feature Discovery](https://kubernetes-sigs.github.io/node-feature-discovery/) | Hardware feature detection, used to target iGPU-capable workers |
+| intel-gpu-plugin | Intel iGPU device plugin — exposes hardware transcoding to `jellyfin`/media workloads, pinned via `kubernetes.io/hostname` nodeSelectors |
+
+### Observability
+
+| Component | Description |
+|---|---|
+| [Victoria Metrics](https://victoriametrics.com/) | Metrics storage and monitoring |
+| [Victoria Logs](https://docs.victoriametrics.com/victorialogs/) | Log storage |
+| [Grafana Operator](https://grafana.github.io/grafana-operator/) | Grafana deployment and dashboard management |
+
+### Automation
+
+| Component | Description |
+|---|---|
+| [Renovate](https://docs.renovatebot.com/) | Self-hosted; scans `clusters/**.yaml` for Flux/Helm-chart/image version bumps; automerge is branch-based, dashboard on GitHub Issues |
+
+## App structure pattern
 
 Each app lives at `clusters/cluster0/kubernetes/apps/<namespace>/<app>/`:
 
 ```
-<app>/
-  ks.yaml   # one or more Flux Kustomizations (path -> ./app, targetNamespace,
-            # prune: true, wait: false); multi-stage apps chain several
-            # Kustomizations in one ks.yaml with dependsOn (e.g. cert-manager:
-            # chart, then issuers)
-  app/      # raw manifests: Deployment/HelmRelease, Service, ExternalSecret, ...
-            # (no inner kustomization.yaml)
+<namespace>/
+├── kustomization.yaml    # lists each app's ks.yaml; adding an app = one line here
+├── namespace.yaml        # namespace definition
+└── <app>/
+    ├── ks.yaml            # one or more Flux Kustomizations (path -> ./app,
+    │                      # targetNamespace, prune: true, wait: false);
+    │                      # multi-stage apps chain several Kustomizations in
+    │                      # one ks.yaml with dependsOn (e.g. cert-manager:
+    │                      # chart, then issuers)
+    └── app/               # raw manifests: Deployment/HelmRelease, Service,
+                            # ExternalSecret, ... (no inner kustomization.yaml)
 ```
 
-`<namespace>/kustomization.yaml` lists each app's `ks.yaml`; adding an app
-means adding one line there (the namespace itself is auto-discovered by the
-root Flux Kustomization, no further registration needed).
+The namespace directory itself is auto-discovered by the root Flux
+Kustomization — there is no central app registry to edit when adding one.
 
-`renovate.json` scans `clusters/**.yaml` for Flux/Helm-chart/image versions
-and opens PRs; automerge is branch-based, dashboard on GitHub Issues.
+## Secret management
+
+Secrets follow a two-tier model:
+
+1. **1Password + External Secrets Operator** — the primary path for
+   application secrets. `ExternalSecret` resources pull from a 1Password
+   vault (`biggs-sz`) through `onepassword-connect`, referencing the
+   `onepassword-connect` `ClusterSecretStore`. This is how nearly everything
+   (API keys, app credentials, tokens) reaches the cluster — nothing is
+   hardcoded in plaintext in Git.
+2. **SOPS with age encryption** — used for the small bootstrap set of secrets
+   that External Secrets itself depends on (the 1Password Connect credentials
+   file and API token), since those can't be chicken-and-egg sourced from
+   1Password. Encrypted in place under
+   `external-secrets/onepassword-connect/app/`; only `data`/`stringData`
+   fields are encrypted (`encrypted_regex` in the SOPS metadata), so resource
+   shape stays diffable in PRs.
 
 ## Hardcoded values to change if you fork this
 
@@ -119,6 +172,11 @@ and opens PRs; automerge is branch-based, dashboard on GitHub Issues.
 - `wildcard-gregbob-net` Gateway name and `*.gregbob.net` / `biggs.dog` hosts
   in HTTPRoutes — your own domain(s).
 - `sync.url` in `clusters/cluster0/flux-system/flux-instance.yaml` — your fork's URL.
+- The `age` recipient block inside the two SOPS-encrypted secrets under
+  `external-secrets/onepassword-connect/app/` — re-encrypt for your own age
+  key (there's no root `sops.yaml`/`.sops.yaml` config here; each file
+  carries its own `sops:` metadata), or replace them with plaintext
+  bootstrapped out-of-band.
 
 # Setup
 
