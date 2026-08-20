@@ -166,18 +166,15 @@ spec:
               mountPath: /dev/net/tun
             - name: state
               mountPath: /var/lib/netbird
-          # `netbird status --check ready` is the documented health check. The
-          # daemon serves the status API on its unix socket in foreground mode,
-          # so this works in-container. Readiness-only: a failing readiness
-          # gate does NOT restart the container, so even a flaky probe can't
-          # take the tunnel down -- the pod just reports NotReady. If the socket
-          # turns out unavailable in foreground mode, drop the probe entirely.
-          readinessProbe:
-            exec:
-              command: ["/usr/local/bin/netbird", "status", "--check", "ready"]
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            failureThreshold: 6
+          # NOTE: no readiness/liveness probe. The natural check,
+          # `netbird status --check ready`, needs the daemon's unix socket
+          # (/var/run/netbird.sock), which foreground mode does NOT create
+          # (verified on 0.74.3: no socket in /var/run, none in
+          # /proc/net/unix across the host netns; status CLI fails with
+          # "failed to connect to daemon"). A probe that can never succeed
+          # keeps every pod NotReady forever and fails the Flux health check.
+          # Health signal is the process itself: a hung/exited daemon
+          # crash-loops the container and shows in DS status/restarts.
       volumes:
         - name: tun
           hostPath:
