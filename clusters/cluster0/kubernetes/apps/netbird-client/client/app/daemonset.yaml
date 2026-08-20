@@ -92,11 +92,15 @@ spec:
           # and netbirdio/netbird-server ship together). Confirm the tag exists
           # for the client image if you bump the server.
           image: netbirdio/netbird:0.74.3
-          # Image ENTRYPOINT is /go/bin/netbird (cf. the server manifest, whose
-          # entrypoint is /go/bin/netbird-server). Foreground mode runs the
-          # daemon in-process; all config comes from NB_* env vars (precedence:
+          # Binary lives at /usr/local/bin/netbird in current images (moved from
+          # /go/bin/netbird in older releases -- the old path broke the pod with
+          # "exec: /go/bin/netbird: no such file or directory"). We invoke the
+          # binary directly, bypassing the image's netbird-entrypoint.sh (which
+          # wraps `service run` + `up` in a bash supervisor): foreground mode
+          # runs the daemon in-process as a single PID, which is the k8s-native
+          # shape. All config comes from NB_* env vars (precedence:
           # env > flag > config file).
-          command: ["/go/bin/netbird"]
+          command: ["/usr/local/bin/netbird"]
           args: ["up", "--foreground-mode"]
           env:
             - name: NB_MANAGEMENT_URL
@@ -158,7 +162,7 @@ spec:
           # turns out unavailable in foreground mode, drop the probe entirely.
           readinessProbe:
             exec:
-              command: ["/go/bin/netbird", "status", "--check", "ready"]
+              command: ["/usr/local/bin/netbird", "status", "--check", "ready"]
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 6
