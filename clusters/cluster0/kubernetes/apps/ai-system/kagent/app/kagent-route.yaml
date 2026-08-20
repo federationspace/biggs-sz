@@ -1,4 +1,16 @@
 ---
+# External HTTPS route for the kagent browser UI (kagent-ui:8080).
+#
+# AUTH: this UI is intentionally UNAUTHENTICATED. The source port shipped a
+# kagent-ui-auth-policy.yaml (oauth2-proxy forward-auth against an `auth`
+# namespace / auth.gregbob.net SSO endpoint), but neither oauth2-proxy nor that
+# SSO endpoint exists in biggs-sz, and the policy would have failed CLOSED into
+# a redirect loop (oauth2-proxy's /oauth2/auth returns 202, which agentgateway
+# extAuth treats as an authorization failure) AND needed a cross-namespace
+# ReferenceGrant that does not exist. Rather than ship a broken fail-closed
+# policy, it was removed; the UI is served without auth. Re-introduce SSO by
+# deploying oauth2-proxy (namespace `auth`) + an auth.gregbob.net route + a
+# ReferenceGrant, then add a policy whose ext-auth returns 200 on success.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:

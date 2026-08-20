@@ -11,7 +11,7 @@ spec:
     - name: kagent # CRDs + controller + RemoteMCPServer all come from this HelmRelease
   interval: 3m
   path: ./clusters/cluster0/kubernetes/apps/ai-system/kagent/cilium-agents
-  prune: false
+  prune: true
   sourceRef:
     kind: GitRepository
     name: flux-system

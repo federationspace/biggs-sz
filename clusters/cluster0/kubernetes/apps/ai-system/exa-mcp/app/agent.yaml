@@ -40,18 +40,20 @@ spec:
     # Per-agent vector memory is enabled. The earlier overflow on exa was NOT
     # caused by memory (the pgvector `memory` table had 0 rows); it was from
     # Exa search results (~38KB/result) ballooning session history past the
-    # 131K vLLM cap (one session hit ~164K tokens). The real fix was raising
-    # vLLM --max-model-len to 192K (vllm/app/deployment.yaml); memory stays on.
-    # If overflow recurs, prune the kagent pgvector store or raise max-model-len
-    # further (see the vLLM deployment notes).
+    # vLLM serve cap. Exa results are large, so with the conservative 32768
+    # placeholder window on the 24 GiB 3090 (vllm/app/deployment.yaml
+    # --max-model-len, pending a real-GPU measurement) a few results can fill
+    # the window; memory stays on but session history is the pressure. If
+    # overflow recurs, prune the kagent pgvector store or raise --max-model-len
+    # after measuring on the real GPU (see the vLLM deployment notes).
     memory:
       # Long-term (cross-session) vector memory via the in-cluster
       # Infinity embedding server (ModelConfig `embedding-model`) + pgvector.
       modelConfig: embedding-model
       ttlDays: 30
     deployment:
-      nodeSelector:
-        nvidia.com/gpu.present: "true"
+      # No nodeSelector: CPU-only agent runner. The old nvidia.com/gpu.present
+      # pin matched no biggs-sz node and made the pod unschedulable.
       resources:
         requests:
           cpu: 50m

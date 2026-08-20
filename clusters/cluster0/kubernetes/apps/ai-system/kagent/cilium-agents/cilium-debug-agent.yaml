@@ -33,8 +33,8 @@ spec:
         summarizer:
           modelConfig: default-model-config
     deployment:
-      nodeSelector:
-        nvidia.com/gpu.present: "true"
+      # No nodeSelector: CPU-only agent runner. The old nvidia.com/gpu.present
+      # pin matched no biggs-sz node and made the pod unschedulable.
       resources:
         requests:
           cpu: 50m

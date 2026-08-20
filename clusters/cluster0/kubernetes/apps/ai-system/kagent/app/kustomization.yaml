@@ -10,7 +10,6 @@ resources:
   - ./kagent-database-url.yaml
   - ./kagent-mcp-route.yaml
   - ./kagent-route.yaml
-  - ./kagent-ui-auth-policy.yaml
   # MCP authentication
   - ./external-secret.yaml
   - ./kagent-mcp-auth-policy.yaml

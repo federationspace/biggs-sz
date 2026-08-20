@@ -37,8 +37,19 @@ spec:
       - name: stage
         image: amazon/aws-cli:2.36.24
         env:
-        - {name: AWS_ACCESS_KEY_ID, value: rustfsadmin}
-        - {name: AWS_SECRET_ACCESS_KEY, value: rustfsadmin}
+        # RustFS credentials from the rustfs-credentials Secret (materialized by
+        # substrate/app/rustfs-externalsecret.yaml), NOT the plaintext
+        # rustfsadmin defaults.
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: rustfs-credentials
+              key: access-key
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: rustfs-credentials
+              key: secret-key
         - {name: AWS_DEFAULT_REGION, value: us-east-1}
         command: ["/bin/sh", "-c"]
         args:

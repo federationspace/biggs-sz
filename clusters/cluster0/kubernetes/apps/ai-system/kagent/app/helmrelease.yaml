@@ -46,8 +46,9 @@ spec:
           # ----------------------------------------------------------------
           # Grafana MCP — mount the service account token so the mcp/grafana
           # server can authenticate against Grafana. The ExternalSecret
-          # (grafana-mcp-token-secret.yaml) creates the secret and the env
-          # var is picked up by the container.
+          # (grafana-mcp-token-externalsecret.yaml) materializes the secret from
+          # the onepassword-connect ClusterSecretStore and the env var is picked
+          # up by the container.
           # Also add -allowed-hosts=* so the MCP server accepts requests
           # from the kagent controller via the Service DNS (not just loopback).
           # ----------------------------------------------------------------
@@ -80,6 +81,29 @@ spec:
                     secretKeyRef:
                       name: kagent-grafana-mcp-token
                       key: GRAFANA_SERVICE_ACCOUNT_TOKEN
+          # ----------------------------------------------------------------
+          # WorkerPool nodeSelector. The chart's substrate-workerpool.yaml
+          # template renders only replicas + ateomImage (substrateWorkerPool.
+          # template is ignored), so the rendered WorkerPool has NO nodeSelector
+          # and kagent-default could land on any node — breaking the node-local
+          # runsc cache (runsc-cache DaemonSet) + host-runtime assumptions.
+          # Patch spec.template.nodeSelector (the WorkerPool CRD shape is
+          # spec.template.nodeSelector, NOT spec.template.spec.nodeSelector) to
+          # pin it to the GPU node (nv-01). op: add creates spec.template first,
+          # then the nodeSelector, since the template renders neither.
+          # ----------------------------------------------------------------
+          - target:
+              group: ate.dev
+              version: v1alpha1
+              kind: WorkerPool
+            patch: |-
+              - op: add
+                path: /spec/template
+                value: {}
+              - op: add
+                path: /spec/template/nodeSelector
+                value:
+                  nvidia.com/gpu.present: "true"
   install:
     remediation:
       retries: 3
@@ -143,6 +167,70 @@ spec:
       grafana:
         url: "http://grafana.observability:80/api"
     # ------------------------------------------------------------------
+    # kagent-tools RBAC — de-privilege the shared MCP tool server.
+    #
+    # By DEFAULT the kagent-tools subchart renders
+    # ClusterRole/kagent-tools-cluster-admin-role with apiGroups/resources/verbs
+    # [*] plus wildcard nonResourceURLs, bound to the `kagent-tools`
+    # ServiceAccount that EVERY Agent's k8s_*/helm_*/cilium_* tools call over a
+    # single shared MCP endpoint. That makes a prompt-injected agent — or any
+    # holder of the shared MCP API key — effectively cluster-admin (including
+    # secret reads and helm uninstall). Override to least privilege:
+    #
+    #   readOnly: true   -> renders the chart's read-only ClusterRole
+    #                       (get/list/watch on core/apps/batch/networking/
+    #                        autoscaling) INSTEAD of cluster-admin.
+    #   allowSecrets: false -> the read-only role gets NO access to Secrets.
+    #   namespaces: []   -> kept cluster-SCOPED (not per-namespace Roles): the
+    #                       observability/promql/cilium read tools inspect
+    #                       resources across all namespaces, so a cluster-wide
+    #                       READ surface is required; the privilege reduction is
+    #                       read-only + no-secrets, not namespace scoping.
+    #   additionalRules  -> read (get/list/watch) on the CRD groups these agents
+    #                       actually inspect (Cilium, Gateway API, Flux toolkit,
+    #                       Prometheus-operator, kagent/ate CRs), which the base
+    #                       read-only role does not cover.
+    #
+    # CONSEQUENCE (intended): the MUTATING tools exposed by the substrate
+    # agents — k8s_apply_manifest / k8s_delete_resource / k8s_patch_resource /
+    # k8s_execute_command, helm_upgrade / helm_uninstall, cilium_install /
+    # cilium_upgrade / cilium_update_service — now FAIL CLOSED at the RBAC layer.
+    # Re-enabling any of them must be done behind a SEPARATE, narrowly-scoped
+    # Role bound explicitly (a distinct authorization boundary), never by
+    # restoring the shared cluster-admin grant.
+    # ------------------------------------------------------------------
+    kagent-tools:
+      rbac:
+        create: true
+        readOnly: true
+        allowSecrets: false
+        namespaces: []
+        additionalRules:
+          # Cilium CRDs (cilium read/inspect tools)
+          - apiGroups: ["cilium.io"]
+            resources: ["*"]
+            verbs: ["get", "list", "watch"]
+          # Gateway API (route/gateway inspection)
+          - apiGroups: ["gateway.networking.k8s.io"]
+            resources: ["*"]
+            verbs: ["get", "list", "watch"]
+          # Flux toolkit (flux-agent / observability read)
+          - apiGroups:
+              - "helm.toolkit.fluxcd.io"
+              - "kustomize.toolkit.fluxcd.io"
+              - "source.toolkit.fluxcd.io"
+              - "notification.toolkit.fluxcd.io"
+            resources: ["*"]
+            verbs: ["get", "list", "watch"]
+          # Prometheus operator CRs (promql / observability agents)
+          - apiGroups: ["monitoring.coreos.com"]
+            resources: ["*"]
+            verbs: ["get", "list", "watch"]
+          # kagent + substrate CRs (self-inspection)
+          - apiGroups: ["kagent.dev", "ate.dev"]
+            resources: ["*"]
+            verbs: ["get", "list", "watch"]
+    # ------------------------------------------------------------------
     # Default model provider -> our in-cluster vLLM (OpenAI-compatible).
     # The chart renders a ModelConfig named "default-model-config" that
     # the built-in agents use. Pointing it at vLLM keeps everything local.
@@ -153,7 +241,7 @@ spec:
         provider: OpenAI
         # Must match vLLM's --served-model-name (not the HuggingFace weights
         # path -- see vllm/app/deployment.yaml for why they differ).
-        model: "qwen 3.8 - local"
+        model: "qwen-local"
         apiKeySecretRef: kagent-vllm
         apiKeySecretKey: OPENAI_API_KEY
         config:
@@ -163,13 +251,13 @@ spec:
     # runtime from a mounted secret file, so no credentials live in git.
     #
     # vectorEnabled=true: long-term (cross-session) vector memory via pgvector.
-    # NOTE: the model's NATIVE window is 262K, but vLLM SERVES at a 131K cap
-    # (vllm/app/deployment.yaml --max-model-len=131072) for KV-concurrency
-    # headroom. 131K is tight for flux-agent's ~64K tool schemas + memory +
-    # tasks, and accumulated vector memory DID overflow it (input_tokens=131073
-    # on flux-agent); memory is now disabled per-agent on flux-agent
-    # (flux-mcp/app/agent.yaml). The other agents have no per-agent memory block
-    # and remain well under the cap.
+    # NOTE: the model's NATIVE window is 262K, but vLLM SERVES at a much smaller
+    # cap on the 24 GiB 3090 (vllm/app/deployment.yaml --max-model-len, a
+    # conservative 32768 placeholder pending a real-GPU measurement). That is
+    # tight for flux-agent's ~64K tool schemas + memory + tasks, so memory is
+    # disabled per-agent on flux-agent (flux-mcp/app/agent.yaml). The other
+    # agents have no per-agent memory block. If the maintainer raises the vLLM
+    # window after measuring, this pressure eases.
     database:
       postgres:
         bundled:
@@ -223,7 +311,10 @@ spec:
       # bundle: ... no such file or directory". Renovate bumps for the whole
       # substrate stack are grouped + automerge:false (see renovate.json).
       ateomImage: ghcr.io/kagent-dev/substrate/ateom-gvisor:v0.0.10
-      template:
-        spec:
-          nodeSelector:
-            nvidia.com/gpu.present: "true"
+      # NOTE: substrateWorkerPool.template is intentionally NOT set here — the
+      # kagent 0.9.12 chart's substrate-workerpool.yaml template renders ONLY
+      # `replicas` and `ateomImage`, so any `template:` value is silently
+      # dropped. The WorkerPool nodeSelector (spec.template.nodeSelector, which
+      # pins kagent-default to the GPU node for the node-local runsc cache +
+      # host runtime) is instead applied by a postRenderer patch on the rendered
+      # WorkerPool — see the postRenderers block above.

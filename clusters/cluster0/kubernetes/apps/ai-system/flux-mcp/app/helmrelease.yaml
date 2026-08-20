@@ -18,19 +18,6 @@ spec:
     cleanupOnFail: true
     remediation:
       retries: 3
-  # Pin the flux-operator-mcp server pod to the GPU node (nv-01), matching
-  # the rest of the ai-system stack. JSON 6902 patch (op: add) targets the
-  # chart's Deployment; safe because the chart sets no nodeSelector by default.
-  postRenderers:
-    - kustomize:
-        patches:
-          - target:
-              kind: Deployment
-            patch: |-
-              - op: add
-                path: /spec/template/spec/nodeSelector
-                value:
-                  nvidia.com/gpu.present: "true"
   values:
     # Streamable HTTP transport: matches the RemoteMCPServer protocol
     # (STREAMABLE_HTTP) and the /mcp endpoint the kagent controller calls.
@@ -40,15 +27,20 @@ spec:
     # ("inspection and troubleshooting ... Read-only"). Disables MCP tools
     # that mutate cluster state.
     readonly: true
-    # Disable the chart's bundled Kubernetes NetworkPolicy. The cluster uses
-    # Cilium for enforcement, and Cilium also honors K8s NP objects, so a
-    # chart-managed NP with empty ingress.namespaces (the default) would deny
-    # all ingress to the pod and break the ai-system -> flux-system:9090 path.
-    # The required path is already covered by the CNP
-    # 'allow-egress-to-flux-mcp' in ai-system, and flux-system has no CNPs
-    # restricting ingress, so Cilium's default allow applies.
+    # Keep the chart's bundled Kubernetes NetworkPolicy and allow ingress from
+    # ai-system. The target FluxInstance runs with networkPolicy: true, whose
+    # generated flux-system policy selects EVERY pod and allows only
+    # same-namespace ingress plus scraping on 8080. This MCP listens on 9090 and
+    # is called from ai-system (the kagent RemoteMCPServer), so without an
+    # explicit allow that cross-namespace connection is denied. The cited
+    # 'allow-egress-to-flux-mcp' CiliumNetworkPolicy does not exist in this repo,
+    # so rely on the chart NP instead: create it and allow the ai-system
+    # namespace as an ingress source.
     networkPolicy:
-      create: false
+      create: true
+      ingress:
+        namespaces:
+          - ai-system
     rbac:
       # Disable the chart's cluster-admin ClusterRoleBinding. The flux-operator-mcp
       # server is a read-only diagnostic agent (readonly: true above); cluster-admin

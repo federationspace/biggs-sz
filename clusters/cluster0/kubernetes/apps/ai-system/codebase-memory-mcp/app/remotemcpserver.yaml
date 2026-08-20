@@ -18,7 +18,7 @@ spec:
     get_architecture, get_code_snippet), literal search (search_code), and
     indexing/project management (index_repository, list_projects,
     index_status, check_index_coverage, manage_adr). Currently indexes the
-    biggs.dog GitOps repo (auto-synced from main); more repos can be added.
+    biggs-sz GitOps repo (auto-synced from main); more repos can be added.
   protocol: STREAMABLE_HTTP
   url: http://codebase-memory-mcp.ai-system:8080/mcp
   sseReadTimeout: 5m0s

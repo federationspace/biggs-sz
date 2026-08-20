@@ -1,10 +1,25 @@
 ---
 # External HTTPS route for the vLLM OpenAI-compatible API.
-# Exposes /v1/* at vllm.gregbob.net for Zed AI, Open WebUI, or any
+# Exposes ONLY /v1/* at vllm.gregbob.net for Zed AI, Open WebUI, or any
 # OpenAI-SDK client pointing at the local LLM.
 #
-# Authentication: vLLM enforces --api-key on all /v1/* endpoints;
-# clients must send:  Authorization: Bearer <VLLM_API_KEY>
+# SECURITY — why the match is scoped to /v1 (NOT "/"):
+#   vLLM's --api-key (VLLM_API_KEY) auth middleware guards only /v1, /v2,
+#   /inference, and /cohere. The server ALSO registers, with NO auth:
+#     POST /invocations, /pause, /abort_requests, /update_weights,
+#     /metrics, /tokenize, /version
+#   A "PathPrefix: /" match publishes all of those to the internet
+#   (vllm.gregbob.net -> Cloudflare), letting any client run inference or
+#   disrupt the server without the bearer key. vLLM's own security docs warn
+#   not to rely on VLLM_API_KEY alone. So we route ONLY /v1 here; every other
+#   path has NO matching rule and is therefore DENIED at the gateway (404,
+#   never forwarded to the pod). This is the explicit deny-by-omission for
+#   everything outside /v1.
+#
+# Gateway-level auth: the vllm-api-key AgentgatewayPolicy (below) enforces
+# bearer-token auth at the gateway on this route as defense-in-depth, so /v1
+# is protected at BOTH the gateway and vLLM (--api-key) layers rather than by
+# VLLM_API_KEY alone.
 #
 # Retrieve the key (run once, add to your client config):
 #   kubectl -n ai-system get secret kagent-vllm \
@@ -21,15 +36,43 @@ spec:
     - name: wildcard-gregbob-net
       namespace: network
   rules:
+    # ONLY the authenticated OpenAI-compatible surface (/v1/*). Everything
+    # else (/invocations, /pause, /metrics, /tokenize, /version, ...) has no
+    # rule and is denied at the gateway.
     - backendRefs:
         - name: vllm
           port: 8000
       matches:
         - path:
             type: PathPrefix
-            value: /
-      # LLM completions at 256K context can run for minutes; set a
+            value: /v1
+      # LLM completions at long context can run for minutes; set a
       # generous timeout (600 s = 10 min) beyond the gateway default.
       timeouts:
         request: 600s
         backendRequest: 600s
+---
+# Gateway-level bearer-token auth in front of the vLLM /v1 route.
+# Mirrors the kagent-mcp-api-key policy pattern. Validates the incoming
+# Authorization: Bearer <token> at the gateway against the kagent-vllm Secret
+# BEFORE the request reaches vLLM, so the internet-facing endpoint is not
+# protected by vLLM's --api-key alone. The Secret's values (OPENAI_API_KEY and
+# VLLM_API_KEY, both the same shared key materialized by the kagent-vllm
+# ExternalSecret) are the accepted tokens, so a client sending the same bearer
+# it already uses for vLLM passes both layers.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: vllm-api-key
+  namespace: ai-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: vllm
+  traffic:
+    apiKeyAuthentication:
+      mode: Strict
+      # location omitted — defaults to Authorization header with "Bearer " prefix
+      secretRef:
+        name: kagent-vllm

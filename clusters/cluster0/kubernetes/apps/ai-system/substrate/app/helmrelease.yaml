@@ -37,13 +37,16 @@ spec:
                 path: /spec/template/spec/containers/0/args/-
                 value: "--ateapi-conn-spec=dns:///api.ai-system.svc:443"
           # STEP 2 (auth): the kube-apiserver --service-account-issuer is Omni's
-          # KubeSpan/SideroLink ULA (IPv6, unreachable from the IPv4-only pod
-          # network), and SA tokens carry it as `iss`. ateapi checks `iss` against
-          # --client-jwt-issuer and fetches keys via OIDC discovery from that
-          # issuer host. We (a) set issuer=ULA below so the `iss` check passes,
-          # and (b) run a forked ateapi that adds --client-jwt-jwks-url to fetch
-          # the identical keys directly from the reachable in-cluster API instead
-          # of doing unreachable discovery against the ULA.
+          # KubeSpan/SideroLink ULA on the SOURCE cluster, but biggs-sz runs
+          # k3s, whose --service-account-issuer is
+          # `https://kubernetes.default.svc.cluster.local` (verified by a
+          # read-only probe of the target API server). SA tokens carry that as
+          # `iss`. ateapi (JWT mode) rejects any token whose `iss` does not match
+          # --client-jwt-issuer, so the issuer override below is set to the k3s
+          # issuer to match (see values.auth.jwt.issuer). We additionally run a
+          # forked ateapi that adds --client-jwt-jwks-url so keys are fetched
+          # directly from the reachable in-cluster API rather than via OIDC
+          # discovery.
           #
           # STEP 3 (atelet discovery): in v0.0.7, controlapi.AteletInformer()
           # scoped its SharedInformerFactory to a hard-coded
@@ -130,6 +133,80 @@ spec:
                 value:
                   - "--cluster-announce-ip"
                   - "$(POD_IP)"
+          # ----------------------------------------------------------------
+          # RustFS credentials via Secret, not plaintext chart defaults.
+          # The chart injects rustfs.accessKey/secretKey (rustfsadmin/
+          # rustfsadmin) as LITERAL env values on the rustfs Deployment, the
+          # atelet DaemonSet, and the rustfs-bucket-init Job. Rewrite each to a
+          # secretKeyRef against the rustfs-credentials Secret (materialized by
+          # rustfs-externalsecret.yaml from the biggs-sz vault), so no object-
+          # store admin credential is committed to git and the defaults are
+          # rotated. The env INDICES below are pinned against the chart at the
+          # digest-pinned OCIRepository (helm template of this exact chart:
+          # rustfs RUSTFS_ACCESS_KEY=4/RUSTFS_SECRET_KEY=5, atelet
+          # AWS_ACCESS_KEY_ID=5/AWS_SECRET_ACCESS_KEY=6, bucket-init
+          # AWS_ACCESS_KEY_ID=0/AWS_SECRET_ACCESS_KEY=1); re-verify with
+          # `helm template` if the substrate chart version is bumped.
+          - target:
+              kind: Deployment
+              name: rustfs
+            patch: |-
+              - op: replace
+                path: /spec/template/spec/containers/0/env/4
+                value:
+                  name: RUSTFS_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: rustfs-credentials
+                      key: access-key
+              - op: replace
+                path: /spec/template/spec/containers/0/env/5
+                value:
+                  name: RUSTFS_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: rustfs-credentials
+                      key: secret-key
+          - target:
+              kind: DaemonSet
+              name: atelet
+            patch: |-
+              - op: replace
+                path: /spec/template/spec/containers/0/env/5
+                value:
+                  name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: rustfs-credentials
+                      key: access-key
+              - op: replace
+                path: /spec/template/spec/containers/0/env/6
+                value:
+                  name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: rustfs-credentials
+                      key: secret-key
+          - target:
+              kind: Job
+              name: rustfs-bucket-init
+            patch: |-
+              - op: replace
+                path: /spec/template/spec/containers/0/env/0
+                value:
+                  name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: rustfs-credentials
+                      key: access-key
+              - op: replace
+                path: /spec/template/spec/containers/0/env/1
+                value:
+                  name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: rustfs-credentials
+                      key: secret-key
   # Drift correction: when the chart/values are unchanged, Flux no-ops the helm
   # upgrade, so out-of-band changes (a deleted resource, a `kubectl edit`) silently
   # persist while status stays Ready=True. This is exactly how the valkey-cluster
@@ -150,8 +227,14 @@ spec:
   values:
     auth:
       jwt:
-        # Equal to the kube-apiserver --service-account-issuer (the Omni ULA) so
-        # projected SA tokens' `iss` claim matches. Key fetch is redirected via
-        # --client-jwt-jwks-url (forked ateapi). Audience is left at the chart
-        # default (api.ate-system.svc), which both sides agree on.
-        issuer: "https://[fdae:41e4:649b:9303::1]:10000"
+        # Equal to the biggs-sz k3s kube-apiserver --service-account-issuer so
+        # projected SA tokens' `iss` claim matches ateapi's --client-jwt-issuer
+        # check. This is the k3s in-cluster API issuer (the SOURCE cluster's
+        # Omni/KubeSpan ULA is NOT used here — biggs-sz runs k3s, and a
+        # read-only probe of the target API server returns this exact issuer).
+        # It also matches the chart default, so this line is explicit-for-clarity
+        # rather than a true override. Key fetch is still redirected via
+        # --client-jwt-jwks-url (forked ateapi) at the reachable in-cluster API.
+        # Audience is left at the chart default (api.ate-system.svc), which both
+        # sides agree on.
+        issuer: "https://kubernetes.default.svc.cluster.local"

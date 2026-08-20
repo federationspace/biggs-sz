@@ -49,12 +49,13 @@ spec:
         summarizer:
           modelConfig: default-model-config
     # NOTE: per-agent vector memory is DISABLED for flux-agent. It was the root
-    # cause of the agent's context-overflow failures (input_tokens=131073,
-    # HTTP 400 before the first tool call). The flux-operator-mcp tool schemas
-    # alone are ~64K tokens; against the 131K vLLM serve cap
-    # (vllm/app/deployment.yaml --max-model-len=131072) that leaves only ~67K
-    # for the system message, builtin prompt includes, memory retrieval, and the
-    # session. As cross-session vector memory accumulated, top-K retrieval grew
+    # cause of the agent's context-overflow failures (HTTP 400 before the first
+    # tool call). The flux-operator-mcp tool schemas alone are ~64K tokens;
+    # against the vLLM serve cap (vllm/app/deployment.yaml --max-model-len — a
+    # conservative 32768 placeholder on the 24 GiB 3090, pending a real-GPU
+    # measurement) the tool schemas alone already dominate the window, leaving
+    # little for the system message, builtin prompt includes, memory retrieval,
+    # and the session. As cross-session vector memory accumulated, top-K grew
     # until even a trivial task tipped the assembled prompt over the ceiling
     # ("hi" still fit, any real Flux query 400'd). The session compaction above
     # only bounds intra-session events -- it cannot shrink tool schemas or
@@ -71,8 +72,8 @@ spec:
     #   modelConfig: embedding-model
     #   ttlDays: 30
     deployment:
-      nodeSelector:
-        nvidia.com/gpu.present: "true"
+      # No nodeSelector: CPU-only agent runner. The old nvidia.com/gpu.present
+      # pin matched no biggs-sz node and made the pod unschedulable.
       resources:
         requests:
           cpu: 50m

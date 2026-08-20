@@ -20,15 +20,13 @@
 #   * So runsc must be staged IN rustfs bucket `ate-snapshots`. The URL's host is
 #     the bucket name: `https://ate-snapshots/runsc` -> bucket=ate-snapshots,
 #     object=runsc, fetched from rustfs.
-#   * Staging (one-off, when bumping the pinned version): from a host with
-#     internet, download runsc, then stream it into rustfs, e.g.
-#       kubectl run u --rm -i --restart=Never --image=amazon/aws-cli:2.17.0 \
-#         --env=AWS_ACCESS_KEY_ID=rustfsadmin --env=AWS_SECRET_ACCESS_KEY=rustfsadmin \
-#         --env=AWS_DEFAULT_REGION=us-east-1 -n ai-system -- sleep 600   # then:
-#       cat runsc-x86_64 | kubectl exec -i -n ai-system u -- \
-#         aws --endpoint-url http://rustfs.ai-system.svc:9000 s3 cp - \
-#         s3://ate-snapshots/runsc --expected-size <bytes>
-#     The substrate chart's bundled rustfs uses creds rustfsadmin/rustfsadmin.
+#   * Staging is GitOps-managed: the runsc-upload Job (runsc-upload.yaml)
+#     downloads this pinned, SHA-256-verified binary from the upstream gVisor
+#     release and streams it into rustfs at s3://ate-snapshots/runsc. When
+#     bumping the pinned version, update VERSION + SHA in runsc-upload.yaml and
+#     runsc-cache.yaml together with the sha256 below. RustFS credentials come
+#     from the rustfs-credentials Secret (rustfs-externalsecret.yaml), not the
+#     old rustfsadmin defaults.
 apiVersion: ate.dev/v1alpha1
 kind: SandboxConfig
 metadata:

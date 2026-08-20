@@ -1,0 +1,49 @@
+---
+# Restrict ingress to the RustFS API (9000) and console (9001). The substrate
+# chart ships RustFS with NO NetworkPolicy, so by Cilium's default-allow any
+# pod in the cluster could reach the object store that holds actor snapshots
+# and the runsc binary the privileged atelet loads. This policy (a standard
+# Kubernetes NetworkPolicy, which Cilium honors) limits ingress to the RustFS
+# clients that legitimately need it, all in-namespace:
+#   - the atelet DaemonSet (reads/writes snapshots)
+#   - the runsc-cache DaemonSet (stages runsc from the bucket)
+#   - the rustfs-bucket-init Job (creates the bucket)
+#   - the runsc-upload bootstrap Job (seeds the runsc object)
+# Console (9001) is left reachable only from the same set; expose it more
+# narrowly or via port-forward if a human needs the UI.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rustfs-ingress
+  namespace: ai-system
+  labels:
+    app.kubernetes.io/name: rustfs
+spec:
+  podSelector:
+    matchLabels:
+      app: rustfs
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        # atelet DaemonSet (substrate chart labels its pods app=atelet)
+        - podSelector:
+            matchLabels:
+              app: atelet
+        # runsc-cache DaemonSet (this repo)
+        - podSelector:
+            matchLabels:
+              app: runsc-cache
+        # rustfs-bucket-init Job (substrate chart)
+        - podSelector:
+            matchLabels:
+              job-name: rustfs-bucket-init
+        # runsc-upload bootstrap Job (this repo)
+        - podSelector:
+            matchLabels:
+              app: runsc-upload
+      ports:
+        - protocol: TCP
+          port: 9000
+        - protocol: TCP
+          port: 9001

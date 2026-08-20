@@ -32,7 +32,7 @@ metadata:
 #                        the .so files are staged FLAT) so it execs natively
 #                        under musl and its `cli` indexing workers resolve libs.
 #   side  git-sync     : NATIVE SIDECAR (initContainer, restartPolicy: Always)
-#                        keeps a fresh clone of biggs.dog in /repo.
+#                        keeps a fresh clone of biggs-sz in /repo.
 #   init  wait-for-repo: blocks until git-sync produces the first clone.
 #   main  mcp-proxy    : spawns the patched binary and serves it at :8080/mcp.
 #
@@ -85,9 +85,9 @@ spec:
     spec:
       serviceAccountName: codebase-memory-mcp
       terminationGracePeriodSeconds: 30
-      # Pin to the GPU node (nv-01), matching the rest of the ai-system stack.
-      nodeSelector:
-        nvidia.com/gpu.present: "true"
+      # No nodeSelector: this is a CPU-only workload. It was previously pinned
+      # to nvidia.com/gpu.present, which no biggs-sz node carries, so it was
+      # unschedulable. It needs no GPU-node locality and schedules anywhere.
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -217,7 +217,7 @@ spec:
                 - "CHOWN"
             seccompProfile:
               type: RuntimeDefault
-        # NATIVE SIDECAR: keeps a fresh shallow clone of biggs.dog at
+        # NATIVE SIDECAR: keeps a fresh shallow clone of biggs-sz at
         # /repo/current (symlink). restartPolicy: Always makes it start during
         # the init phase and run for the pod's lifetime. Placed BEFORE
         # wait-for-repo so the clone appears while the wait init runs. The
@@ -229,7 +229,7 @@ spec:
           image: registry.k8s.io/git-sync/git-sync:v4.7.1
           imagePullPolicy: IfNotPresent
           args:
-            - --repo=https://github.com/shrinedogg/biggs.dog.git
+            - --repo=https://github.com/federationspace/biggs-sz.git
             - --ref=main
             - --depth=1
             - --period=120s
@@ -302,7 +302,7 @@ spec:
                 - "ALL"
             seccompProfile:
               type: RuntimeDefault
-        # Index (or refresh) the biggs.dog graph with a STABLE project name
+        # Index (or refresh) the biggs-sz graph with a STABLE project name
         # before mcp-proxy starts serving, so the very first MCP session sees
         # an indexed graph. WITHOUT this the server's list_projects is empty
         # on a fresh PVC: the upstream stdio binary has no auto-index — its
@@ -313,7 +313,7 @@ spec:
         # fresh despite git-sync rotating the /repo/current symlink to a new
         # .worktrees/<hash> worktree on each pull (the watcher can't follow
         # that retarget). Idempotent + ~3s for this repo, so startup cost is
-        # negligible. --name biggs.dog fixes the project identity across
+        # negligible. --name biggs-sz fixes the project identity across
         # re-indexes; otherwise the server derives the name from the resolved
         # symlink target (repo-.worktrees-<sha>), orphaning a NEW project per
         # commit and defeating the watcher entirely. The patched binary (INTERP
@@ -326,7 +326,7 @@ spec:
           args:
             - >-
               /opt/cbm/bin/codebase-memory-mcp cli index_repository
-              --repo-path /repo/current --mode full --name biggs.dog
+              --repo-path /repo/current --mode full --name biggs-sz
           env:
             - name: PYTHONDONTWRITEBYTECODE
               value: "1"

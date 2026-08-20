@@ -41,104 +41,93 @@ spec:
       containers:
         - name: vllm
           # ================================================================
-          # ⚠️  biggs-sz PORT WARNING — GPU ARCHITECTURE MISMATCH  ⚠️
+          # biggs-sz GPU: RTX 3090 (Ampere, sm_86, 24 GiB) on nv-01.
           # ----------------------------------------------------------------
-          # The source config targets an RTX 5090 (Blackwell, sm_120, 32GB).
-          # Per the port request, "5090" text was changed to "3090", but the
-          # RTX 3090 is Ampere (sm_86, 24GB) and CANNOT run this workload as-is:
+          # The source config targeted an RTX 5090 (Blackwell, sm_120, 32 GiB)
+          # with an NVFP4 checkpoint (4-bit FLOAT — requires Blackwell tensor
+          # cores, will NOT load on Ampere) and a 177184-token window tuned for
+          # 32 GiB. Both were unrunnable on the 3090 and, because this
+          # Kustomization gates the ai-system stack, an init failure blocked
+          # reconciliation. This manifest now ships Ampere-compatible,
+          # 24-GiB-safe values:
           #
-          #   1. MODEL FORMAT: --model=unsloth/Qwen3.8-27B-NVFP4 is NVFP4
-          #      (4-bit float), a hardware format that REQUIRES Blackwell
-          #      (sm_120) tensor cores. NVFP4 will NOT load/execute on a 3090.
-          #      An Ampere-compatible quant is REQUIRED instead, e.g. an
-          #      AWQ/GPTQ INT4 or GGUF build of Qwen3.8-27B (verify one exists
-          #      on HF and set --model + the matching quant flags).
-          #   2. VRAM: 3090 has 24GB vs the 5090's 32GB. --gpu-memory-utilization
-          #      and --max-model-len (177184) are tuned for 32GB; the KV pool
-          #      must be re-measured and almost certainly reduced on 24GB.
+          #   1. MODEL: an INT4 (AutoRound, auto-gptq-compatible) quant of the
+          #      dense Qwen3.6-27B — INT4 weights run on Ampere sm_86. ~19 GiB
+          #      of weights, the smallest verified public Ampere quant, leaving
+          #      real KV headroom on 24 GiB. See --model below.
+          #   2. VRAM/CONTEXT: --max-model-len is set CONSERVATIVELY (see the
+          #      note there) so the KV pool fits on 24 GiB with margin for
+          #      activations + CUDA graphs. This is a placeholder ceiling — the
+          #      maintainer MUST re-measure on the real 3090 (vLLM prints the
+          #      profiled KV ceiling on boot) and can raise it toward that
+          #      number, never past util 0.96.
           #   3. --kv-cache-dtype=fp8 is well-supported on Ampere; keep it.
           #
-          # These are RUNTIME prerequisites, not manifest-validity issues: the
-          # YAML renders fine, but the pod will CrashLoop on a real 3090 until
-          # the model/quant + VRAM knobs are adjusted. Left intact deliberately
-          # so the maintainer makes the hardware call. See the PR description.
+          # NOTE: the specific checkpoint + exact context cap are a DECOUPLE
+          # placeholder (this port does not have the GPU to measure on). Treat
+          # --model and --max-model-len as maintainer-tunable, not final.
           # ================================================================
-          # (source comment, now stale after the 5090->3090 text swap:)
-          # CUDA 12.9 build supports the 3090 (Blackwell, sm_120).
           image: docker.io/vllm/vllm-openai:v0.27.1
           args:
             # ----------------------------------------------------------------
-            # MODEL: unsloth's NVFP4 (compressed-tensors) quant of Alibaba's
-            # dense Qwen3.8-27B:
-            #   https://huggingface.co/unsloth/Qwen3.8-27B-NVFP4
-            # A 27B DENSE model (all params active -> slower per-token than the
-            # old 35B-A3B MoE, but strong agentic-coding quality), with a
-            # Gated-DeltaNet / gated-attention hybrid (only 16 of 64 layers keep
-            # paged KV, so long context stays cheap) and 262K native context.
-            # NVFP4 needs Blackwell (nv-01's RTX 3090, sm_120).
-            # History: rdtand/Qwen3.6-27B-PrismaSCOUT-Blackwell-NVFP4-BF16-vllm
-            # (~20GB disk / ~18GiB resident), then unsloth/Qwen3.6-27B-NVFP4
-            # (~26GB / ~23GiB resident, BF16 vision tower). THIS 3.8 quant is
-            # Unsloth Dynamic V3.0: ~19.9GB on disk, the smallest of the three,
-            # so it leaves MORE KV headroom than either 3.6 quant. We still
-            # serve TEXT-ONLY via --language-model-only (the vision tower's
-            # weights load but are never used by kagent).
-            # All tuning below is IDENTICAL to the Qwen3.6 config per request:
-            # the 177184 window was vLLM's measured ceiling for the 3.6 unsloth
-            # quant (5.71GiB KV available, 2026-08-15). With this smaller 3.8
-            # quant the same window fits with extra margin; do not raise it
-            # without re-measuring (and never past util 0.96, see below).
-            # Quantization is compressed-tensors and AUTO-DETECTED from the
-            # checkpoint's quantization_config -- do NOT pass --quantization
-            # (the old --quantization=modelopt was for NVIDIA's 35B and is wrong
+            # MODEL (Ampere placeholder): an INT4 AutoRound quant of the dense
+            # Qwen3.6-27B:
+            #   https://huggingface.co/Lorbus/Qwen3.6-27B-int4-AutoRound
+            # A 27B DENSE model (all params active). INT4 AutoRound weights are
+            # auto-gptq-compatible and run on Ampere sm_86 (the 3090) — unlike
+            # the source's NVFP4, which needs Blackwell. ~19 GiB of weights (the
+            # smallest verified public Ampere quant of this model), so it leaves
+            # real KV headroom on the 24 GiB card.
+            # DECOUPLE NOTE: this is a PLACEHOLDER checkpoint chosen so the
+            # manifest is runnable on the target GPU; the maintainer may swap it
+            # for any other Ampere-validated (AWQ/GPTQ/INT4/GGUF) build. The old
+            # NVFP4 lineage (rdtand PrismaSCOUT NVFP4, unsloth NVFP4) is retired
+            # because NVFP4 cannot load on Ampere.
+            # Quantization is AUTO-DETECTED from the checkpoint's
+            # quantization_config -- do NOT pass --quantization (the old
+            # --quantization=modelopt was for NVIDIA's 35B NVFP4 and is wrong
             # here).
-            # NOTE: if v0.23.0 lacks the dense Qwen3_5ForConditionalGeneration
-            # arch or the qwen3_coder tool parser, bump the image tag (or use
-            # :nightly).
-            # --served-model-name must match the kagent HelmRelease provider.
+            # --served-model-name must match the kagent HelmRelease provider
+            # (kagent/app/helmrelease.yaml providers.openAI.model).
             # ----------------------------------------------------------------
-            - --model=unsloth/Qwen3.8-27B-NVFP4
-            # served-model-name is intentionally different from --model:
-            # the slash in the HuggingFace path (unsloth/) gets stripped by some
-            # clients (e.g. Zed), causing 404s. A slash-free alias fixes all
-            # clients; kagent and Zed both use this name, not the weights path.
-            # NOTE: the id literally contains spaces ("qwen 3.8 - local"), per
-            # request; clients must send it exactly. The kagent HelmRelease
-            # provider was updated in the same commit; the old qwen36-local id
-            # is retired.
-            - --served-model-name=qwen 3.8 - local
-            # NOTE: --quantization is intentionally OMITTED. This checkpoint is
-            # compressed-tensors NVFP4 and vLLM auto-detects it from the config;
-            # forcing modelopt (the 35B's quant) would mis-load the weights.
+            - --model=Lorbus/Qwen3.6-27B-int4-AutoRound
+            # served-model-name is intentionally different from --model: the
+            # slash in the HuggingFace path gets stripped by some clients (e.g.
+            # Zed), causing 404s, and spaces in an id break others. This
+            # slash-free, space-free, VERSION-AGNOSTIC alias fixes all clients
+            # and survives a model swap without a rename; kagent and Zed use
+            # this name, not the weights path. (The old space-containing
+            # "qwen 3.8 - local" id is retired; kagent's provider was updated in
+            # this same commit.)
+            - --served-model-name=qwen-local
             # fp8 KV cache + hybrid attention keep the KV pool small even at
             # long context.
             - --kv-cache-dtype=fp8
-            # 173K context (177184 tokens). This is vLLM's MEASURED ceiling for
-            # the 3.6 unsloth quant at util 0.96 on v0.27.1 (2026-08-15): the engine
-            # profiled 5.71GiB of available KV and refused to boot at 229376
-            # ("7.32 GiB KV cache is needed ... estimated maximum model length
-            # is 177184"). The July 80K ceiling for this quant is stale: v0.27.1
-            # profiles CUDA graph memory explicitly, freeing more for KV.
-            # Headroom over the largest observed exa-agent session (~164K
-            # tokens) is only ~9K, and a single max-length sequence consumes
-            # the entire pool, so long-context concurrency is 1-2 sessions;
-            # short prompts still run 8-way (see --max-num-seqs). To regain the
-            # 224K window, switch back to the rdtand quant (~18GiB resident,
-            # ~8.3GiB pool) or add VRAM. Do NOT exceed ~0.96 util (0.97 caused
-            # a full node lockup on 2026-06-25).
-            - --max-model-len=177184
-            # nv-01's GPU is time-sliced (replicas=4) and shared with
-            # GPU-operator validators and the DRA plugin. (The embeddings server
-            # moved to CPU, so it no longer contends for VRAM here.) At 0.97 vLLM
-            # reserved ~31.6GB, leaving ~1GB free, which contributed to a full
-            # node lockup (2026-06-25) back when embeddings was ALSO on the GPU.
-            # With the lighter ~18GiB-resident rdtand quant, 0.96 (~30.7GB
-            # reserved) yields an ~8.3GiB fp8 KV pool (~250K tokens; 5.71GiB
-            # and a 177184-token ceiling with the unsloth quant, measured
-            # 2026-08-15) -- the headroom that held the 224K window under
-            # rdtand. This is the documented CEILING: 0.97 reserved ~31.6GB
-            # (~1GB free) and caused a full node lockup on 2026-06-25. Do NOT
-            # push past 0.96.
+            # 32K context (32768 tokens) — CONSERVATIVE 24-GiB placeholder.
+            # This Qwen3.6-27B is a Gated-DeltaNet hybrid: only 16 of its 64
+            # layers (full_attention_interval=4) keep paged KV, so long context
+            # is cheaper than a fully-dense model — but the source's 177184 was
+            # still profiled on a 32 GiB card and does NOT fit on 24 GiB. Per
+            # the review's measurement for this model class on the 3090: ~19-20
+            # GiB INT4 weights + FP8 KV for the 16 full-attention layers puts
+            # the 177184 window well over 24 GiB, and the raw-KV ceiling at util
+            # 0.96 is only ~94k tokens. A too-large window makes vLLM refuse to
+            # boot (the exact failure the review flagged) and blocks the stack,
+            # so 32768 is a safe floor chosen WITHOUT a 3090 to profile on.
+            # MAINTAINER: on the real GPU, read vLLM's boot log — it prints the
+            # profiled available KV and the "estimated maximum model length" —
+            # and raise this toward that number (never past util 0.96). If long
+            # agent context is needed and the ceiling is too low, the lever is a
+            # smaller checkpoint or more VRAM, not a higher cap here.
+            - --max-model-len=32768
+            # Cap GPU memory at 0.96 on the 24 GiB 3090. 0.97 previously reserved
+            # nearly the whole card and caused a full node lockup (2026-06-25),
+            # so 0.96 is the documented CEILING — do NOT push past it. The GPU is
+            # time-sliced (replicas=4) and shared with GPU-operator validators +
+            # the DRA plugin; the embeddings server has moved to CPU so it no
+            # longer contends for VRAM here. At ~19 GiB INT4 weights, 0.96 leaves
+            # a few GiB for the fp8 KV pool + activations + CUDA graphs, which is
+            # what the conservative 32768 window above is sized to fit.
             - --gpu-memory-utilization=0.96
             # Per-step token budget for (chunked) prefill + decode. Bumped from
             # 4096 to 8192 to handle medium-length tool-context prompts more
@@ -154,11 +143,9 @@ spec:
             # and the pod restarted (exit 0, "Completed"). 32-way still matches or
             # exceeds realistic concurrent agent count, lets vLLM QUEUE excess
             # requests instead of compute-locking, and keeps /health responsive.
-            # Keep capture-size == max-num-seqs. 8-way alongside the 177184
-            # window: a single max-length sequence consumes ~5.5GiB of the
-            # 5.71GiB fp8 KV pool, so the pool holds only ONE full-length
-            # sequence at a time. 8-way lets vLLM admit a
-            # burst of short/medium agent prompts while QUEUEING (not
+            # Keep capture-size == max-num-seqs. 8-way sizing: at the small 24-GiB
+            # KV pool a single long sequence can consume most of it, so vLLM
+            # admits a burst of short/medium agent prompts while QUEUEING (not
             # compute-locking) when several long-context sessions land together;
             # prefix caching + chunked prefill keep queued work moving. If agent
             # fan-out proves starved, the lever is more VRAM, not a higher
@@ -166,20 +153,20 @@ spec:
             - --max-num-seqs=8
             - --max-cudagraph-capture-size=8
             - --enable-prefix-caching
-            # Qwen3.8's hybrid (Gated-DeltaNet) arch may ship custom modeling
+            # Qwen3.6's hybrid (Gated-DeltaNet) arch may ship custom modeling
             # code; the model card sets trust-remote-code. NOTE: executes repo
             # Python.
             - --trust-remote-code
-            # Qwen3.8 tool-call + reasoning parsers (same qwen3_5 arch family
-            # as 3.6, per the model card: the dense 27B uses the qwen3_coder
-            # tool parser -- NOT the 35B's qwen3_xml; reasoning parser stays
-            # qwen3).
+            # Qwen3.6 tool-call + reasoning parsers (qwen3_5 arch family): the
+            # dense 27B uses the qwen3_coder tool parser -- NOT the 35B's
+            # qwen3_xml; reasoning parser stays qwen3.
             - --enable-auto-tool-choice
             - --tool-call-parser=qwen3_coder
             - --reasoning-parser=qwen3
-            # Text-only kagent traffic: skip the vision encoder + multimodal
-            # profiling entirely. REQUIRED for the VRAM fit -- loading the
-            # vision tower would push resident weights to ~26GB and starve KV.
+            # Text-only kagent traffic: this checkpoint carries a vision tower
+            # (qwen3_5 multimodal arch), so skip the vision encoder + multimodal
+            # profiling entirely. Recommended for the VRAM fit -- loading the
+            # vision tower would add resident weights and starve KV on 24 GiB.
             - --language-model-only
             # Keep port 8000 to match the Service and the kagent provider baseUrl.
             - --host=0.0.0.0

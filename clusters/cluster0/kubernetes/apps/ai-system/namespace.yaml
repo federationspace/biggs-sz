@@ -4,13 +4,18 @@ kind: Namespace
 metadata:
   name: ai-system
   labels:
-    # Privileged: the vLLM inference server runs on the nv-01 GPU node and
-    # relies on NVIDIA CDI device injection (nvidia.com/gpu).
-    #
-    # All kagent agent-runner pods are hardened via spec.declarative.deployment
-    # security contexts (runAsNonRoot: true, drop ALL capabilities). The
-    # enforcement level stays at privileged to accommodate the vLLM runtime
-    # which requires elevated isolation (CDI device injection).
+    # PSS: enforce stays privileged ONLY because a few workloads in this
+    # namespace genuinely need it — the substrate atelet DaemonSet (privileged:
+    # true, hostPath, loads runsc on the host) and the cert-manager CSI driver.
+    # (The proper long-term fix is to move those two into a dedicated system
+    # namespace and enforce baseline here, per the review.) audit and warn are
+    # tightened to `restricted` so that everything else — the internet-facing
+    # vLLM model server, the MCP servers, and the kagent code-runner agents
+    # (kagent renders a privileged container when executeCodeBlocks is set
+    # without a securityContext) — is flagged in the audit log and on kubectl
+    # apply if it drifts above restricted, restoring the admission guardrails a
+    # blanket `privileged` label removed. The agent runners already set
+    # runAsNonRoot + drop ALL, so they pass restricted.
     pod-security.kubernetes.io/enforce: privileged
-    pod-security.kubernetes.io/audit: privileged
-    pod-security.kubernetes.io/warn: privileged
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
