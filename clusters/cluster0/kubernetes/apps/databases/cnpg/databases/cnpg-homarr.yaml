@@ -1,25 +1,28 @@
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
-  name: cnpg-romm
+  name: cnpg-homarr
   namespace: cnpg-system
 spec:
+  # enableSuperuserAccess: true
+  # superuserSecret:
+  #   name: homarr-superuser-password
   instances: 3
   bootstrap:
     initdb:
-      database: romm
-      owner: romm
+      database: homarrdb
+      owner: homarr
       dataChecksums: true
       secret:
-        name: romm-user-password
+        name: homarr-user-password
   imageName: ghcr.io/cloudnative-pg/postgresql:18.1
   resources:
     requests:
       memory: 500Mi
-      cpu: 500m
+      cpu:  500m
     limits:
       memory: 500Mi
       cpu: 500m
   storage:
-    size: 10Gi
+    size: 5Gi
     storageClass: local-path
