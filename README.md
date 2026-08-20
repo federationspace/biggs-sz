@@ -1,63 +1,153 @@
 # Biggs was my dog.
-He was the best boy and when I found out I could buy a domain with .dog as the extension, I migrated my homelab services to biggs.dog to honor him.
+
+He was the best boy, and when I found out I could buy a domain with `.dog` as
+the extension, I migrated my homelab services to `biggs.dog` (and its sibling
+`gregbob.net`) to honor him.
 
 # What is this?
-This is a mono repository for my home infrastructure and Kubernetes cluster. I try to adhere to Infrastructure as Code (IaC) and GitOps practices.
 
-## design choices
+This is a mono-repository for my home infrastructure and Kubernetes cluster.
+It follows Infrastructure as Code (IaC) and GitOps practices via [Flux CD](https://fluxcd.io/):
+everything the cluster runs is declared here as YAML, and Flux reconciles the
+live cluster to match `main`. There is no application source code in this
+repo — only declarative infrastructure.
 
-I made some hard choices based on my environment that may not appeal to you or your use-case.
+Flux is bootstrapped via the [flux-operator](https://github.com/controlplaneio-fluxcd/flux-operator)
+(`FluxInstance`), tracking `refs/heads/main` at path `clusters/cluster0`. The
+root Kustomization auto-discovers every `clusters/cluster0/kubernetes/apps/<namespace>/`
+directory — there is no central app registry to edit when adding a namespace.
 
-My NAS is an Ubuntu bare-metal host that besides a ZFS pool also hosts my k3s control plane (`control-01`); I do this because I host pods on my control plane related to media management and downloading. This is to avoid downloading directly to the HDDs in my ZFS pool, but instead download to the node's local SSD as a temporary location and move downloaded/extracted files via local disk transfer to the ZFS pool instead of using my limited 1Gbps networking equipment. This introduces stickiness, but the goal of this particular cluster is not to provide these applications with some absurd availablity completely decoupled from the hose, but rather to clusterize and codify a bunch of homelab services that otherwise would be difficult to manage. If my NAS is down, the media pods aren't worth much, so this is stickiness I can live with for these services at this time.
+## Design choices
 
-## hardware assumptions/prereqs
+I made some hard choices based on my environment that may not appeal to you
+or your use case.
 
-These values here are configurable and listed in our next section, and the hardware preferences are my own.
+My NAS is a bare-metal host that, besides a ZFS pool, also hosts my k3s
+control plane (`control-00`); I do this because I host pods on the control
+plane related to media management and downloading. This avoids downloading
+directly to the HDDs in my ZFS pool — instead files stage on the node's
+local SSD and move to the ZFS pool via local disk transfer, sidestepping my
+limited 1Gbps networking equipment. This introduces stickiness, but the goal
+of this cluster is not to give these applications availability decoupled
+from the host; it's to clusterize and codify a bunch of homelab services that
+would otherwise be hard to manage. If my NAS is down, the media pods aren't
+worth much anyway, so that's stickiness I can live with.
 
-1) You are deploying only one control node for k3s with the hostname of `control-01`
-2) You have an NFS share at IP of `192.168.2.30` and/or `192.168.2.32`
-3) You have 3 worker nodes with the hostnames `worker-01`, `worker-02`, `worker-03`.
-	a) Two of these worker nodes (1 & 2 specifically) should have Intel iGPUs for hardware accelleration of the `jellyfin` & `ersatztv` media workloads.
-4)  Each node in the cluster has atleast 512GB+ in local SSD on the root drive. NVME drives atleast PCI-E 3.0 or above in XFS format preferred.
-	a) The default storageclass used for this cluster is the `local-path` type found as part of the k3s package.
-5) IPs used for `metallb-system` are resources that use MetalLB to create its L2 `loadbalancer` resources in your cluster's services.
+## Cluster layout
 
-### hardcoded resources/values?
+- Single k3s control plane node: `control-00` (the NAS, see above).
+- Worker nodes: `worker-00`, `worker-01`, `worker-05`.
+- Storage classes:
+  - `local-path` — default, k3s built-in, node-local SSD.
+  - `ceph-block` — [Rook-Ceph](https://rook.io/), for workloads that need
+    replicated block storage independent of any one node.
+  - `nfs` — external NFS share, for shared/media volumes.
+- Media apps that need Intel iGPU hardware transcoding (`jellyfin`, etc.)
+  are pinned via `kubernetes.io/hostname` nodeSelectors to the workers that
+  have the iGPU (see `intel-gpu-plugin` / `nfd` in `kube-system`).
+- Networking: [Cilium](https://cilium.io/) provides the CNI, and
+  `CiliumLoadBalancerIPPool` + BGP advertisement (in
+  `kube-system/cilium/bgp/`) hand out `LoadBalancer` service IPs from the
+  `192.168.2.0/24` range via L2/BGP — **not** MetalLB (a MetalLB Helm
+  repository source still exists in `flux-system/sources` but is currently
+  unused/legacy).
+- Ingress/exposure (`network/` namespace):
+  - `k8s-gateway` — Gateway API implementation; HTTPRoutes reference the
+    shared Gateway `wildcard-gregbob-net` in the `network` namespace by name.
+  - `cloudflared` — Cloudflare Tunnel, terminating `*.gregbob.net` (+ apex)
+    proxied traffic and forwarding HTTP-only to
+    `wildcard-gregbob-net.network.svc:80` inside the cluster. There is no
+    port-forwarded ingress from the internet other than SSH; everything
+    public rides the tunnel.
+  - `agentgateway` — gateway for AI/agent-facing traffic.
+- Secrets: [External Secrets Operator](https://external-secrets.io/) synced
+  from a 1Password vault via `onepassword-connect`
+  (`ClusterSecretStore: onepassword-connect`). Nothing is hardcoded in Git.
+- Certificates: cert-manager with a `letsencrypt-prod` `ClusterIssuer` using
+  Cloudflare DNS-01 challenges.
 
-Yes, unforunately there are a few of which to be aware at the time of writing this.
+## Applications by namespace
 
-- Search the repo for `kubernetes.io/hostname: control-01` to edit the main control node hostname value where it's used.
-- Search the repo for `kubernetes.io/hostname: worker-0*` to edit the worker node hostname values where they are used.
-- Search the repo for `provisioner: external-nfs` to edit the IP value of your NFS share available to kubernetes.
-- Search the repo for `kind: IPAddressPool` resources in the repo to your desired value.
-- Search the repo for `vaults:` and edit the vault name to that of your existing 1password vault.
-- Search the repo for `- host:` to edit ingress host values to match your existing host.
+| Namespace | Apps |
+|---|---|
+| `ai-system` | vllm, kagent, substrate, embeddings, exa-mcp, flux-mcp, victoria-metrics-mcp, mindwtr-mcp, codebase-memory-mcp, agent-sandbox, csi-driver |
+| `cert-manager` | cert-manager |
+| `databases` | cnpg (CloudNativePG) |
+| `external-secrets` | external-secrets, onepassword-connect |
+| `git-system` | gitea, act_runner |
+| `gregbob` | gregbob (personal site/services + IRC) |
+| `kube-system` | cilium, nfs, nfd, intel-gpu-plugin, volsync, snapshot-controller |
+| `matrix` | continuwuity, sable |
+| `media` | jellyfin, plex, sonarr, radarr, lidarr, readarr, prowlarr, sabnzbd, ombi, homarr, romm, rreading-glasses, epub-only, media-storage |
+| `netbird-client` | client (NetBird mesh VPN agent) |
+| `network` | agentgateway, k8s-gateway, cloudflared |
+| `observability` | victoria-metrics, victoria-logs, grafana-operator |
+| `renovate` | renovate (self-hosted, keeps chart/image pins current) |
+| `rook-ceph` | rook-ceph (Ceph operator + cluster, backs `ceph-block` SC) |
+
+## Repo conventions
+
+Each app lives at `clusters/cluster0/kubernetes/apps/<namespace>/<app>/`:
+
+```
+<app>/
+  ks.yaml   # one or more Flux Kustomizations (path -> ./app, targetNamespace,
+            # prune: true, wait: false); multi-stage apps chain several
+            # Kustomizations in one ks.yaml with dependsOn (e.g. cert-manager:
+            # chart, then issuers)
+  app/      # raw manifests: Deployment/HelmRelease, Service, ExternalSecret, ...
+            # (no inner kustomization.yaml)
+```
+
+`<namespace>/kustomization.yaml` lists each app's `ks.yaml`; adding an app
+means adding one line there (the namespace itself is auto-discovered by the
+root Flux Kustomization, no further registration needed).
+
+`renovate.json` scans `clusters/**.yaml` for Flux/Helm-chart/image versions
+and opens PRs; automerge is branch-based, dashboard on GitHub Issues.
+
+## Hardcoded values to change if you fork this
+
+- `kubernetes.io/hostname: control-00` / `worker-00` / `worker-01` / `worker-05`
+  — node pins for control-plane-hosted and iGPU-transcoding workloads.
+- `CiliumLoadBalancerIPPool` blocks in `kube-system/cilium/bgp/bgp-config.yaml`
+  — the LoadBalancer IP range.
+- `provisioner: nfs` / NFS server IP — your NFS export.
+- `vaults:` in ExternalSecret/SecretStore resources — your 1Password vault name.
+- `wildcard-gregbob-net` Gateway name and `*.gregbob.net` / `biggs.dog` hosts
+  in HTTPRoutes — your own domain(s).
+- `sync.url` in `clusters/cluster0/flux-system/flux-instance.yaml` — your fork's URL.
 
 # Setup
 
 First, you'll need Kubernetes.
 
-### to install k3s
+### Install k3s
 
-From what you intend to be your k3s main control node:
+On the intended control-plane node:
 
-`curl -sfL https://get.k3s.io | sh -s server --disable servicelb --disable traefik`
-
-Note: the value for your `K3S_TOKEN` can be found at `/var/lib/rancher/k3s/server/node-token` on the control node.
-
-From what you inted to be your k3s worker nodes:
-`curl -sfL https://get.k3s.io | K3S_URL=https://<controlnodeIP>:6443 K3S_TOKEN=<yourvalue> sh -`
-
-
-### to bootstrap with flux
-
+```sh
+curl -sfL https://get.k3s.io | sh -s server --disable servicelb --disable traefik
 ```
-flux bootstrap github  
---token-auth  
---owner=<your_value>
---repository=<your_value> 
---branch=main  
---path=clusters/k3s/flux-system  
---personal
+
+(`servicelb`/`traefik` are disabled because Cilium handles LoadBalancer IPs
+and this repo brings its own gateway.) The `K3S_TOKEN` for joining workers is
+at `/var/lib/rancher/k3s/server/node-token` on the control node.
+
+On each worker node:
+
+```sh
+curl -sfL https://get.k3s.io | K3S_URL=https://<control-plane-ip>:6443 K3S_TOKEN=<token> sh -
 ```
- 
+
+### Bootstrap Flux
+
+This repo uses the [flux-operator](https://github.com/controlplaneio-fluxcd/flux-operator)
+`FluxInstance` CRD rather than `flux bootstrap` directly. Install the
+flux-operator, then apply `clusters/cluster0/flux-system/` (which contains
+the `FluxInstance` plus its `GitRepository`/`HelmRepository`/`OCIRepository`
+sources) against your cluster, pointing `spec.sync.url` at your fork and
+`spec.sync.pullSecret` at a secret with GitHub read access.
+
+From there, Flux reconciles everything under `clusters/cluster0/kubernetes/apps/`
+automatically — no per-app bootstrap step required.
