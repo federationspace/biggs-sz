@@ -1,6 +1,6 @@
 ---
 # Minimal dedicated identity. No cluster RBAC: Hermes talks to Matrix, the
-# Anthropic API, and its own PVC -- it never touches the Kubernetes API.
+# Nous Portal API, and its own PVC -- it never touches the Kubernetes API.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -53,7 +53,7 @@ spec:
     spec:
       serviceAccountName: hermes
       terminationGracePeriodSeconds: 30
-      # CPU-only workload (inference is external Anthropic). Do NOT pin
+      # CPU-only workload (inference is external via Nous Portal). Do NOT pin
       # nvidia.com/gpu.present -- that made other ai-system pods unschedulable.
       # Softly prefer non-GPU nodes so Hermes never competes with vLLM/gaming
       # for the GPU node's resources.
@@ -80,9 +80,10 @@ spec:
       securityContext:
         fsGroup: 10000
       initContainers:
-        # Seed the Git-managed base config into /opt/data before the gateway
-        # starts. Overwrites config.yaml/SOUL.md (Git wins); leaves all
-        # agent-managed state (memories/, sessions/, skills/, cron/) untouched.
+        # Seed the Git-managed base config AND the Nous credential into
+        # /opt/data before the gateway starts. Overwrites config.yaml/SOUL.md/
+        # auth.json every boot (Git + 1Password win); leaves all agent-managed
+        # state (memories/, sessions/, skills/, cron/) untouched.
         - name: seed-config
           image: docker.io/library/busybox:1.37
           imagePullPolicy: IfNotPresent
@@ -92,13 +93,47 @@ spec:
               set -eu
               cp /seed/config.yaml /data/config.yaml
               cp /seed/SOUL.md /data/SOUL.md
-              echo "seeded config.yaml + SOUL.md into /opt/data"
+
+              # Build auth.json with the Nous API key in Hermes's credential
+              # pool format. This is how `hermes auth add nous --type api-key`
+              # stores it: the key goes into access_token, base_url points at
+              # the Portal inference endpoint.
+              NOUS_KEY=$(cat /secrets/NOUS_API_KEY)
+              cat > /data/auth.json <<AUTHJSON
+              {
+                "version": 1,
+                "providers": {},
+                "credential_pool": {
+                  "nous": [{
+                    "id": "k8s-seed",
+                    "label": "1password-seed",
+                    "auth_type": "api_key",
+                    "priority": 0,
+                    "source": "manual",
+                    "access_token": "${NOUS_KEY}",
+                    "base_url": "https://inference-api.nousresearch.com/v1",
+                    "last_status": null,
+                    "last_status_at": null,
+                    "last_error_code": null,
+                    "last_error_reason": null,
+                    "last_error_message": null,
+                    "last_error_reset_at": null,
+                    "request_count": 0
+                  }]
+                }
+              }
+              AUTHJSON
+
+              echo "seeded config.yaml + SOUL.md + auth.json into /opt/data"
           volumeMounts:
             - name: seed
               mountPath: /seed
               readOnly: true
             - name: data
               mountPath: /data
+            - name: secrets
+              mountPath: /secrets
+              readOnly: true
           resources:
             requests:
               cpu: 10m
@@ -127,7 +162,9 @@ spec:
             - name: MATRIX_REQUIRE_MENTION
               value: "true"
           # Provider key, Matrix token/allow-list, and dashboard basic-auth
-          # creds -- all from the hermes-secrets ExternalSecret.
+          # creds -- all from the hermes-secrets ExternalSecret. The Nous API
+          # key is consumed via auth.json (init container), not envFrom; it
+          # still gets mounted here for the Matrix and dashboard env vars.
           envFrom:
             - secretRef:
                 name: hermes-secrets
@@ -171,6 +208,9 @@ spec:
         - name: seed
           configMap:
             name: hermes-config
+        - name: secrets
+          secret:
+            secretName: hermes-secrets
         - name: data
           persistentVolumeClaim:
             claimName: hermes-data

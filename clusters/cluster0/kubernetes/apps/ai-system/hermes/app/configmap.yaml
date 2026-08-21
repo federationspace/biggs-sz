@@ -6,12 +6,12 @@
 # and is NEVER touched by the seed, so it persists across restarts and upgrades.
 #
 # Secrets and platform wiring are NOT here. Per the Hermes docs, the Matrix
-# adapter and provider keys are driven by ENVIRONMENT VARIABLES (MATRIX_*,
-# ANTHROPIC_API_KEY), injected from the hermes-secrets ExternalSecret + a
-# plain MATRIX_HOMESERVER env in the Deployment. config.yaml here holds only
-# the non-secret model selection and runtime guardrails, keeping it to the
-# documented, schema-stable surface (an unverified platforms.* block risks a
-# startup-time schema rejection -> crashloop).
+# adapter is driven by ENVIRONMENT VARIABLES (MATRIX_*), injected from the
+# hermes-secrets ExternalSecret + a plain MATRIX_HOMESERVER env in the
+# Deployment. The model provider key (Nous Portal API key) is seeded into
+# auth.json by the init container (see deployment.yaml) because Hermes stores
+# provider credentials in its credential pool, not as env vars. config.yaml
+# here holds only the non-secret model selection and runtime guardrails.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -21,12 +21,16 @@ metadata:
     app.kubernetes.io/name: hermes
 data:
   config.yaml: |
-    # Model backend: external Anthropic (reliable; independent of the
-    # in-cluster vLLM, which is scaled to 0 during Wolf gaming sessions).
-    # String form matches `hermes config set model anthropic/<model>`.
-    # MAINTAINER-TUNABLE: pick the Anthropic model id you want to run.
-    # ANTHROPIC_API_KEY is supplied via env (hermes-secrets); no key in git.
-    model: anthropic/claude-sonnet-4-5
+    # Model backend: Nous Portal (OpenRouter-compatible; routes to frontier
+    # models from every major lab under a single API key + credit balance).
+    # Independent of the in-cluster vLLM, which is scaled to 0 during Wolf
+    # gaming sessions. The Nous API key lives in auth.json (seeded by the init
+    # container), NOT in config.yaml or an env var.
+    # MAINTAINER-TUNABLE: pick any model from the Portal catalog; names follow
+    # the OpenRouter convention (vendor/model-id).
+    model:
+      default: anthropic/claude-sonnet-4-5
+      provider: nous
 
     # Unattended gateway: enable the tool-loop circuit breaker the Docker docs
     # explicitly recommend for server/gateway deploys (default is off, which
