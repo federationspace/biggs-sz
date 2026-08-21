@@ -35,7 +35,7 @@ spec:
       # Run wherever the atelet DaemonSet runs (all nodes).
       containers:
       - name: stage
-        image: amazon/aws-cli:2.36.24
+        image: amazon/aws-cli:2.36.28
         env:
         # RustFS credentials from the rustfs-credentials Secret (materialized by
         # substrate/app/rustfs-externalsecret.yaml), NOT the plaintext
