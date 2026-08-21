@@ -1,0 +1,47 @@
+---
+# External HTTPS route for the Hermes web dashboard only.
+#
+# Exposes the dashboard (port 9119) at hermes.gregbob.net via the shared
+# gateway -> Cloudflare tunnel (HTTP-only, terminates TLS at Cloudflare).
+#
+# SECURITY -- why ONLY the dashboard is routed, and how it is protected:
+#   * The OpenAI-compatible API server (port 8642) is deliberately NOT routed
+#     here. It stays in-cluster only; publishing it would require
+#     API_SERVER_ENABLED + a key and is a real attack surface.
+#   * The dashboard's OWN auth gate is the protection. On a non-loopback bind
+#     (the container default) with a DashboardAuthProvider registered, Hermes
+#     FAILS CLOSED and redirects every request to a login page. The basic-auth
+#     provider is activated by HERMES_DASHBOARD_BASIC_AUTH_USERNAME/_PASSWORD/
+#     _SECRET, injected from the hermes-secrets ExternalSecret. If those are
+#     unset the dashboard refuses to start on a public bind -- there is no
+#     unauthenticated escape hatch (HERMES_DASHBOARD_INSECURE is a no-op).
+#
+# NOTE ON GATEWAY-LEVEL AUTH (why there is no AgentgatewayPolicy here, unlike
+# the vllm route): vllm's route guards an API surface whose clients send
+# `Authorization: Bearer`, so a Strict apiKeyAuthentication policy fits. The
+# dashboard is browser-facing -- browsers cannot send a bearer header, so a
+# Strict bearer policy would reject the login page itself and make the
+# dashboard unreachable. The app-level basic-auth login gate above is the
+# correct protection for a human-facing surface. If you later want an
+# additional gateway-edge factor, use an AgentgatewayPolicy mode that
+# understands browser auth (e.g. basic/OIDC), not Strict bearer.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: hermes
+  namespace: ai-system
+spec:
+  hostnames:
+    - hermes.gregbob.net
+  parentRefs:
+    - name: wildcard-gregbob-net
+      namespace: network
+  rules:
+    - backendRefs:
+        - name: hermes
+          port: 9119
+      # Agent turns and dashboard streams can run long; give generous timeouts
+      # beyond the gateway default.
+      timeouts:
+        request: 600s
+        backendRequest: 600s

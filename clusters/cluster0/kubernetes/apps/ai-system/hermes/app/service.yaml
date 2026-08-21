@@ -1,0 +1,25 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes
+  namespace: ai-system
+  labels:
+    app.kubernetes.io/name: hermes
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hermes
+  ports:
+    # OpenAI-compatible API server -- in-cluster only (NOT routed externally).
+    # Only reachable if API_SERVER_ENABLED=true; exposed here for future
+    # in-cluster clients / port-forward diagnostics.
+    - name: api
+      port: 8642
+      targetPort: api
+      protocol: TCP
+    # Web dashboard -- backend for httproute.yaml (hermes.gregbob.net).
+    - name: dashboard
+      port: 9119
+      targetPort: dashboard
+      protocol: TCP

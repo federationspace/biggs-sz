@@ -1,0 +1,25 @@
+---
+# Flux Kustomization for the Hermes Agent gateway.
+#
+# No dependsOn: Hermes is a plain Deployment (not a kagent Agent/CRD consumer)
+# and its model backend is external (Anthropic), so it is intentionally
+# un-gated -- it never needs to wait on the vLLM/kagent stack and a vLLM
+# scale-to-0 (gpu-arbiter gaming session) can never block its reconciliation.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app hermes
+  namespace: flux-system
+spec:
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  path: ./clusters/cluster0/kubernetes/apps/ai-system/hermes/app
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  interval: 3m
+  retryInterval: 1m
+  timeout: 5m
