@@ -2,7 +2,7 @@
 
 He's a good boy. Joe's own homelab repo, [`biggs.dog`](https://github.com/shrinedogg/biggs.dog),
 was the starting point I used to build up my Kubernetes and home-server
-skills — this repo grew out of that base. As the cluster became mine, I
+skills; this repo grew out of that base. As the cluster became mine, I
 registered `gregbob.net` to host the services and sites I've since built on
 top of it.
 
@@ -12,12 +12,12 @@ This is a mono-repository for my home infrastructure and Kubernetes cluster.
 It follows Infrastructure as Code (IaC) and GitOps practices via [Flux CD](https://fluxcd.io/):
 everything the cluster runs is declared here as YAML, and Flux reconciles the
 live cluster to match `main`. There is no application source code in this
-repo — only declarative infrastructure.
+repo, only declarative infrastructure.
 
 Flux is bootstrapped via the [flux-operator](https://github.com/controlplaneio-fluxcd/flux-operator)
 (`FluxInstance`), tracking `refs/heads/main` at path `clusters/cluster0`. The
 root Kustomization auto-discovers every `clusters/cluster0/kubernetes/apps/<namespace>/`
-directory — there is no central app registry to edit when adding a namespace.
+directory; there is no central app registry to edit when adding a namespace.
 
 ## Design choices
 
@@ -27,7 +27,7 @@ or your use case.
 My NAS is a bare-metal host that, besides a ZFS pool, also hosts my k3s
 control plane (`control-00`); I do this because I host pods on the control
 plane related to media management and downloading. This avoids downloading
-directly to the HDDs in my ZFS pool — instead files stage on the node's
+directly to the HDDs in my ZFS pool; instead, files stage on the node's
 local SSD and move to the ZFS pool via local disk transfer, sidestepping my
 limited 1Gbps networking equipment. This introduces stickiness, but the goal
 of this cluster is not to give these applications availability decoupled
@@ -39,7 +39,7 @@ worth much anyway, so that's stickiness I can live with.
 
 - Single k3s control plane node: `control-00` (the NAS, see above).
 - Worker nodes: `worker-00`, `worker-01`, `worker-05`.
-- Note: `CiliumLoadBalancerIPPool` + BGP handles `LoadBalancer` IPs —
+- Note: `CiliumLoadBalancerIPPool` + BGP handles `LoadBalancer` IPs,
   **not** MetalLB (a MetalLB Helm repository source still exists in
   `flux-system/sources` but is currently unused/legacy).
 
@@ -59,18 +59,18 @@ clusters/cluster0/
     ├── databases/                # cnpg (CloudNativePG)
     ├── external-secrets/         # external-secrets, onepassword-connect
     ├── git-system/                # gitea, act_runner
-    ├── gregbob/                   # gregbob — personal site/services + IRC
+    ├── gregbob/                   # gregbob, personal site/services + IRC
     ├── kube-system/                # cilium (CNI + BGP/L2), nfs, nfd, intel-gpu-plugin,
     │                              # volsync, snapshot-controller
     ├── matrix/                    # continuwuity, sable
     ├── media/                     # jellyfin, plex, sonarr, radarr, lidarr, readarr, prowlarr,
     │                             # sabnzbd, ombi, homarr, romm, rreading-glasses, epub-only,
     │                             # media-storage
-    ├── netbird-client/            # client — NetBird mesh VPN agent
+    ├── netbird-client/            # client, NetBird mesh VPN agent
     ├── network/                   # agentgateway, k8s-gateway, cloudflared
     ├── observability/             # victoria-metrics, victoria-logs, grafana-operator
-    ├── renovate/                  # renovate — self-hosted, keeps chart/image pins current
-    └── rook-ceph/                 # rook-ceph — Ceph operator + cluster, backs `ceph-block` SC
+    ├── renovate/                  # renovate, self-hosted; keeps chart/image pins current
+    └── rook-ceph/                 # rook-ceph, Ceph operator + cluster, backs `ceph-block` SC
 ```
 
 ## Core components
@@ -81,7 +81,7 @@ clusters/cluster0/
 |---|---|
 | [Cilium](https://cilium.io/) | CNI; `CiliumLoadBalancerIPPool` + BGP advertisement (`kube-system/cilium/bgp/`) hand out `LoadBalancer` IPs from `192.168.2.0/24` |
 | [k8s-gateway](https://github.com/ori-edge/k8s_gateway) | Gateway API implementation; HTTPRoutes attach to the shared Gateway `wildcard-gregbob-net` in `network` by name |
-| [cloudflared](https://github.com/cloudflare/cloudflared) | Cloudflare Tunnel; terminates proxied `*.gregbob.net` (+ apex) traffic and forwards HTTP-only to `wildcard-gregbob-net.network.svc:80` — no other internet-facing ingress besides SSH |
+| [cloudflared](https://github.com/cloudflare/cloudflared) | Cloudflare Tunnel; terminates proxied `*.gregbob.net` (+ apex) traffic and forwards HTTP-only to `wildcard-gregbob-net.network.svc:80`; no other internet-facing ingress besides SSH |
 | agentgateway | Gateway for AI/agent-facing traffic |
 
 ### Identity & secrets
@@ -106,7 +106,7 @@ clusters/cluster0/
 | Component | Description |
 |---|---|
 | [Node Feature Discovery](https://kubernetes-sigs.github.io/node-feature-discovery/) | Hardware feature detection, used to target iGPU-capable workers |
-| intel-gpu-plugin | Intel iGPU device plugin — exposes hardware transcoding to `jellyfin`/media workloads, pinned via `kubernetes.io/hostname` nodeSelectors |
+| intel-gpu-plugin | Intel iGPU device plugin; exposes hardware transcoding to `jellyfin`/media workloads, pinned via `kubernetes.io/hostname` nodeSelectors |
 
 ### Observability
 
@@ -141,19 +141,19 @@ Each app lives at `clusters/cluster0/kubernetes/apps/<namespace>/<app>/`:
 ```
 
 The namespace directory itself is auto-discovered by the root Flux
-Kustomization — there is no central app registry to edit when adding one.
+Kustomization; there is no central app registry to edit when adding one.
 
 ## Secret management
 
 Secrets follow a two-tier model:
 
-1. **1Password + External Secrets Operator** — the primary path for
+1. **1Password + External Secrets Operator**, the primary path for
    application secrets. `ExternalSecret` resources pull from a 1Password
    vault (`biggs-sz`) through `onepassword-connect`, referencing the
    `onepassword-connect` `ClusterSecretStore`. This is how nearly everything
-   (API keys, app credentials, tokens) reaches the cluster — nothing is
+   (API keys, app credentials, tokens) reaches the cluster; nothing is
    hardcoded in plaintext in Git.
-2. **SOPS with age encryption** — used for the small bootstrap set of secrets
+2. **SOPS with age encryption**, used for the small bootstrap set of secrets
    that External Secrets itself depends on (the 1Password Connect credentials
    file and API token), since those can't be chicken-and-egg sourced from
    1Password. Encrypted in place under
@@ -163,17 +163,17 @@ Secrets follow a two-tier model:
 
 ## Hardcoded values to change if you fork this
 
-- `kubernetes.io/hostname: control-00` / `worker-00` / `worker-01` / `worker-05`
-  — node pins for control-plane-hosted and iGPU-transcoding workloads.
-- `CiliumLoadBalancerIPPool` blocks in `kube-system/cilium/bgp/bgp-config.yaml`
-  — the LoadBalancer IP range.
-- `provisioner: nfs` / NFS server IP — your NFS export.
-- `vaults:` in ExternalSecret/SecretStore resources — your 1Password vault name.
+- `kubernetes.io/hostname: control-00` / `worker-00` / `worker-01` / `worker-05`,
+  node pins for control-plane-hosted and iGPU-transcoding workloads.
+- `CiliumLoadBalancerIPPool` blocks in `kube-system/cilium/bgp/bgp-config.yaml`,
+  the LoadBalancer IP range.
+- `provisioner: nfs` / NFS server IP, your NFS export.
+- `vaults:` in ExternalSecret/SecretStore resources, your 1Password vault name.
 - `wildcard-gregbob-net` Gateway name and `*.gregbob.net` / `biggs.dog` hosts
-  in HTTPRoutes — your own domain(s).
-- `sync.url` in `clusters/cluster0/flux-system/flux-instance.yaml` — your fork's URL.
+  in HTTPRoutes, your own domain(s).
+- `sync.url` in `clusters/cluster0/flux-system/flux-instance.yaml`, your fork's URL.
 - The `age` recipient block inside the two SOPS-encrypted secrets under
-  `external-secrets/onepassword-connect/app/` — re-encrypt for your own age
+  `external-secrets/onepassword-connect/app/`, re-encrypt for your own age
   key (there's no root `sops.yaml`/`.sops.yaml` config here; each file
   carries its own `sops:` metadata), or replace them with plaintext
   bootstrapped out-of-band.
@@ -210,4 +210,4 @@ sources) against your cluster, pointing `spec.sync.url` at your fork and
 `spec.sync.pullSecret` at a secret with GitHub read access.
 
 From there, Flux reconciles everything under `clusters/cluster0/kubernetes/apps/`
-automatically — no per-app bootstrap step required.
+automatically; no per-app bootstrap step required.
