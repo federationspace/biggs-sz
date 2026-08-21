@@ -1,0 +1,180 @@
+---
+# Minimal dedicated identity. No cluster RBAC: Hermes talks to Matrix, the
+# Anthropic API, and its own PVC -- it never touches the Kubernetes API.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hermes
+  namespace: ai-system
+  labels:
+    app.kubernetes.io/name: hermes
+---
+# Single source of truth for all Hermes state (config, .env-derived secrets on
+# disk, memories, sessions, skills, cron, logs). ceph-block RWO: replicated,
+# node-independent, and single-writer -- which also structurally prevents the
+# "never run two gateways on one data dir" footgun the docs warn about.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hermes-data
+  namespace: ai-system
+  labels:
+    app.kubernetes.io/name: hermes
+spec:
+  storageClassName: ceph-block
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hermes
+  namespace: ai-system
+  labels:
+    app.kubernetes.io/name: hermes
+    app.kubernetes.io/version: "v2026.8.18"
+spec:
+  replicas: 1
+  # Recreate + RWO PVC: only one gateway process may own /opt/data at a time
+  # (session/memory stores are not safe for concurrent writers).
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hermes
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hermes
+        app.kubernetes.io/version: "v2026.8.18"
+    spec:
+      serviceAccountName: hermes
+      terminationGracePeriodSeconds: 30
+      # CPU-only workload (inference is external Anthropic). Do NOT pin
+      # nvidia.com/gpu.present -- that made other ai-system pods unschedulable.
+      # Softly prefer non-GPU nodes so Hermes never competes with vLLM/gaming
+      # for the GPU node's resources.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/os
+                    operator: In
+                    values: ["linux"]
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 1
+              preference:
+                matchExpressions:
+                  - key: nvidia.com/gpu.present
+                    operator: NotIn
+                    values: ["true"]
+      # s6-overlay's /init (PID 1) starts as root to chown the volume on first
+      # boot, then drops every supervised service to the hermes user (UID
+      # 10000). So this pod canNOT use the strict runAsNonRoot securityContext
+      # the MCP siblings use. fsGroup pre-owns the ceph volume for UID 10000 so
+      # the runtime user can write it without a root chown pass every boot.
+      securityContext:
+        fsGroup: 10000
+      initContainers:
+        # Seed the Git-managed base config into /opt/data before the gateway
+        # starts. Overwrites config.yaml/SOUL.md (Git wins); leaves all
+        # agent-managed state (memories/, sessions/, skills/, cron/) untouched.
+        - name: seed-config
+          image: docker.io/library/busybox:1.37
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              set -eu
+              cp /seed/config.yaml /data/config.yaml
+              cp /seed/SOUL.md /data/SOUL.md
+              echo "seeded config.yaml + SOUL.md into /opt/data"
+          volumeMounts:
+            - name: seed
+              mountPath: /seed
+              readOnly: true
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+      containers:
+        - name: hermes
+          image: docker.io/nousresearch/hermes-agent:v2026.8.18
+          imagePullPolicy: IfNotPresent
+          args: ["gateway", "run"]
+          env:
+            # Enable the supervised web dashboard (published at
+            # hermes.gregbob.net via httproute.yaml). Its basic-auth gate is
+            # satisfied by HERMES_DASHBOARD_BASIC_AUTH_* from hermes-secrets.
+            - name: HERMES_DASHBOARD
+              value: "1"
+            # Matrix homeserver (non-secret): the cluster's own continuwuity
+            # client-server API, reached directly in-cluster (bypasses the
+            # Cloudflare tunnel). server_name is gregbob.net. The Matrix token
+            # + allow-list arrive as secret env from hermes-secrets (envFrom).
+            - name: MATRIX_HOMESERVER
+              value: http://continuwuity-service.matrix.svc.cluster.local:8080
+            # Require an @mention before responding in rooms (default true;
+            # set explicitly). DMs always respond.
+            - name: MATRIX_REQUIRE_MENTION
+              value: "true"
+          # Provider key, Matrix token/allow-list, and dashboard basic-auth
+          # creds -- all from the hermes-secrets ExternalSecret.
+          envFrom:
+            - secretRef:
+                name: hermes-secrets
+          ports:
+            - name: api
+              containerPort: 8642
+              protocol: TCP
+            - name: dashboard
+              containerPort: 9119
+              protocol: TCP
+          # Dashboard HTTP port is always bound when HERMES_DASHBOARD=1, so it
+          # is a reliable liveness/readiness signal without needing the API
+          # server (8642) enabled.
+          readinessProbe:
+            tcpSocket:
+              port: dashboard
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: dashboard
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            # Browser automation (Playwright/Chromium) is the memory-hungry
+            # path; the docs recommend >=2Gi when browser tools are active.
+            limits:
+              memory: 4Gi
+          volumeMounts:
+            - name: data
+              mountPath: /opt/data
+            # Playwright needs shared memory; k8s analog of --shm-size=1g.
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: seed
+          configMap:
+            name: hermes-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: hermes-data
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi

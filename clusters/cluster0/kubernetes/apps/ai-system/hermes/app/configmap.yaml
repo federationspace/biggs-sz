@@ -1,0 +1,44 @@
+---
+# Base Hermes config -- Git is the source of truth for non-secret settings.
+# An init container (see deployment.yaml) copies these into /opt/data on every
+# boot, OVERWRITING config.yaml/SOUL.md so the declared config always wins.
+# Agent-managed state (memories/, sessions/, skills/, cron/) lives on the PVC
+# and is NEVER touched by the seed, so it persists across restarts and upgrades.
+#
+# Secrets and platform wiring are NOT here. Per the Hermes docs, the Matrix
+# adapter and provider keys are driven by ENVIRONMENT VARIABLES (MATRIX_*,
+# ANTHROPIC_API_KEY), injected from the hermes-secrets ExternalSecret + a
+# plain MATRIX_HOMESERVER env in the Deployment. config.yaml here holds only
+# the non-secret model selection and runtime guardrails, keeping it to the
+# documented, schema-stable surface (an unverified platforms.* block risks a
+# startup-time schema rejection -> crashloop).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hermes-config
+  namespace: ai-system
+  labels:
+    app.kubernetes.io/name: hermes
+data:
+  config.yaml: |
+    # Model backend: external Anthropic (reliable; independent of the
+    # in-cluster vLLM, which is scaled to 0 during Wolf gaming sessions).
+    # String form matches `hermes config set model anthropic/<model>`.
+    # MAINTAINER-TUNABLE: pick the Anthropic model id you want to run.
+    # ANTHROPIC_API_KEY is supplied via env (hermes-secrets); no key in git.
+    model: anthropic/claude-sonnet-4-5
+
+    # Unattended gateway: enable the tool-loop circuit breaker the Docker docs
+    # explicitly recommend for server/gateway deploys (default is off, which
+    # only warns -- not enough when no human is watching).
+    tool_loop_guardrails:
+      hard_stop_enabled: true
+      hard_stop_after:
+        exact_failure: 5
+        idempotent_no_progress: 5
+  SOUL.md: |
+    # Hermes -- biggs-sz cluster assistant
+
+    You are the resident agent of the biggs-sz homelab Kubernetes cluster,
+    reachable over Matrix at @hermes:gregbob.net. You are helpful, concise,
+    and honest about uncertainty.
