@@ -8,10 +8,10 @@
 # Secrets and platform wiring are NOT here. Per the Hermes docs, the Matrix
 # adapter is driven by ENVIRONMENT VARIABLES (MATRIX_*), injected from the
 # hermes-secrets ExternalSecret + a plain MATRIX_HOMESERVER env in the
-# Deployment. The model provider key (Nous Portal API key) is seeded into
-# auth.json by the init container (see deployment.yaml) because Hermes stores
-# provider credentials in its credential pool, not as env vars. config.yaml
-# here holds only the non-secret model selection and runtime guardrails.
+# Deployment. The model provider is a NAMED CUSTOM provider (providers.nous)
+# that reads the Nous Portal key from the NOUS_API_KEY env var (mounted from
+# hermes-secrets via envFrom), so the secret never lives in config.yaml.
+# config.yaml here holds only the non-secret provider wiring + model selection.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -21,16 +21,28 @@ metadata:
     app.kubernetes.io/name: hermes
 data:
   config.yaml: |
-    # Model backend: Nous Portal (OpenRouter-compatible; routes to frontier
-    # models from every major lab under a single API key + credit balance).
-    # Independent of the in-cluster vLLM, which is scaled to 0 during Wolf
-    # gaming sessions. The Nous API key lives in auth.json (seeded by the init
-    # container), NOT in config.yaml or an env var.
+    # Model backend: Nous Portal (OpenAI-compatible; routes to frontier models
+    # from many labs under a single API key + credit balance). Independent of
+    # the in-cluster vLLM, which is scaled to 0 during Wolf gaming sessions.
+    #
+    # The provider is a named CUSTOM provider, not the built-in `nous` one:
+    # the built-in nous path requires an OAuth-minted agent_key (invoke JWT),
+    # which a statically-seeded API key never satisfies, so it failed with
+    # "not logged into Nous Portal". A custom provider consumes a static API
+    # key directly (chat_completions). key_env points at the NOUS_API_KEY env
+    # var (from hermes-secrets via envFrom); the key is NOT stored here.
     # MAINTAINER-TUNABLE: pick any model from the Portal catalog; names follow
     # the OpenRouter convention (vendor/model-id).
     model:
-      default: anthropic/claude-sonnet-4-5
+      default: moonshotai/kimi-k3
       provider: nous
+
+    providers:
+      nous:
+        name: nous
+        base_url: https://inference-api.nousresearch.com/v1
+        key_env: NOUS_API_KEY
+        api_mode: chat_completions
 
     # Unattended gateway: enable the tool-loop circuit breaker the Docker docs
     # explicitly recommend for server/gateway deploys (default is off, which
