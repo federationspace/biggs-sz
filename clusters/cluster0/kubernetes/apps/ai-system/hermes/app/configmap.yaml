@@ -35,7 +35,11 @@ data:
     # the OpenRouter convention (vendor/model-id).
     model:
       default: moonshotai/kimi-k3
-      provider: nous
+      # "custom:nous" (not bare "nous"): bare "nous" is shadowed by the built-in
+      # nous provider (which demands an OAuth agent_key and fails with "not
+      # logged in"). The "custom:<name>" form resolves to the providers.nous
+      # block below and consumes the static NOUS_API_KEY via chat_completions.
+      provider: custom:nous
 
     providers:
       nous:
