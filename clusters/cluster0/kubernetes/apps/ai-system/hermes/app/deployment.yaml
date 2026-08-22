@@ -85,7 +85,7 @@ spec:
         # auth.json every boot (Git + 1Password win); leaves all agent-managed
         # state (memories/, sessions/, skills/, cron/) untouched.
         - name: seed-config
-          image: docker.io/library/busybox:1.37
+          image: docker.io/library/busybox:1.38
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-ec"]
           args:
