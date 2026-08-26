@@ -169,6 +169,18 @@ spec:
             # /sethome, so change the room here rather than in chat.
             - name: MATRIX_HOME_ROOM
               value: "!3xVhsLiQSiUFlsHBADJUcMKtP7R_3HfaW659rCAHEDc"
+            # E2EE (non-secret mode switch; the recovery key itself is
+            # secret and comes from hermes-secrets via envFrom below).
+            # "optional" tries E2EE where libolm/mautrix[encryption] are
+            # available (both are present in this image) but keeps
+            # unencrypted rooms/DMs working if crypto setup ever fails,
+            # rather than failing closed like "required" would. Without
+            # this, messages sent in encrypted rooms arrive as
+            # m.room.encrypted ciphertext the bot has no keys to open --
+            # it silently can't read them, which looked like the bot
+            # ignoring @mentions entirely.
+            - name: MATRIX_E2EE_MODE
+              value: "optional"
           # Provider key, Matrix token/allow-list, and dashboard basic-auth
           # creds -- all from the hermes-secrets ExternalSecret, injected as
           # env vars. NOUS_API_KEY is read by the named custom provider's
