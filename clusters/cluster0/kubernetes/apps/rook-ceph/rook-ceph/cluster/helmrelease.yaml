@@ -28,8 +28,19 @@ spec:
     # (see PR #47). Revisit when intentionally upgrading to Tentacle.
     cephImage:
       repository: quay.io/ceph/ceph
-      tag: v21.1.0
+      tag: v19.2.6
     cephClusterSpec:
+      healthCheck:
+        livenessProbe:
+          osd:
+            probe:
+              # osd.2 on worker-05 (slowest NVMe, 24ms apply latency vs 4-8ms
+              # on peers) answers its admin socket in >5s during peering,
+              # which tripped the default 5s x 3 liveness probe and put the
+              # OSD in a kill/re-peer flap loop (1200+ restarts, cluster
+              # stuck 33% degraded). Give it headroom.
+              timeoutSeconds: 30
+              failureThreshold: 6
       cephConfig:
         global:
           bdev_enable_discard: "true" # quote
@@ -82,7 +93,7 @@ spec:
             cpu: 100m
             memory: 1Gi
           limits:
-            memory: 2Gi
+            memory: 4Gi
       storage:
         useAllNodes: false
         useAllDevices: false
