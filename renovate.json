@@ -39,6 +39,13 @@
   ],
   "packageRules": [
     {
+      "description": "Pin ceph daemon image to Squid; major upgrades are intentional (see rook-ceph cluster helmrelease comment)",
+      "matchManagers": ["flux"],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["quay.io/ceph/ceph"],
+      "allowedVersions": "<20.0.0"
+    },
+    {
       "description": "Flux HelmRelease dependencies",
       "matchManagers": ["flux"],
       "matchDatasources": ["helm"],
