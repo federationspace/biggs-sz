@@ -67,7 +67,7 @@ spec:
           # placeholder (this port does not have the GPU to measure on). Treat
           # --model and --max-model-len as maintainer-tunable, not final.
           # ================================================================
-          image: docker.io/vllm/vllm-openai:v0.27.1
+          image: docker.io/vllm/vllm-openai:v0.28.0
           args:
             # ----------------------------------------------------------------
             # MODEL (Ampere placeholder): an INT4 AutoRound quant of the dense
