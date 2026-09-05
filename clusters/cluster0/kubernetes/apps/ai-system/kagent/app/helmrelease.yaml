@@ -310,7 +310,7 @@ spec:
       # feature gates — the worker CrashLoops with "atunnel: reading credential
       # bundle: ... no such file or directory". Renovate bumps for the whole
       # substrate stack are grouped + automerge:false (see renovate.json).
-      ateomImage: ghcr.io/kagent-dev/substrate/ateom-gvisor:v0.0.24
+      ateomImage: ghcr.io/kagent-dev/substrate/ateom-gvisor:v0.0.25
       # NOTE: substrateWorkerPool.template is intentionally NOT set here — the
       # kagent 0.9.12 chart's substrate-workerpool.yaml template renders ONLY
       # `replicas` and `ateomImage`, so any `template:` value is silently
