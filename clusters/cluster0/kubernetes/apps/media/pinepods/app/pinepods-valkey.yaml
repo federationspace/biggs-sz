@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pinepods-valkey
+  namespace: media
+  labels:
+    app: pinepods-valkey
+spec:
+  # PinePods uses Valkey purely as a cache / task broker; state is disposable,
+  # so no persistence and a single replica (standalone, matching the upstream
+  # compose file and the chart's `architecture: standalone`).
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pinepods-valkey
+  template:
+    metadata:
+      labels:
+        app: pinepods-valkey
+    spec:
+      containers:
+        - name: valkey
+          image: valkey/valkey:8-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: valkey
+              containerPort: 6379
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          livenessProbe:
+            tcpSocket:
+              port: valkey
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            tcpSocket:
+              port: valkey
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pinepods-valkey
+  namespace: media
+spec:
+  type: ClusterIP
+  selector:
+    app: pinepods-valkey
+  ports:
+    - name: valkey
+      port: 6379
+      protocol: TCP
+      targetPort: 6379

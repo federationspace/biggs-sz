@@ -1,0 +1,36 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cnpg-pinepods
+  namespace: cnpg-system
+spec:
+  instances: 3
+  bootstrap:
+    initdb:
+      database: pinepods
+      owner: pinepods
+      dataChecksums: true
+      secret:
+        name: pinepods-user-password
+      # PinePods runs its own schema creation/migrations at startup as the
+      # `pinepods` role. initdb makes that role the DATABASE owner but not the
+      # owner of objects the postgres superuser may create later, which is the
+      # `42501 insufficient_privilege` crashloop seen with renovate. Grant the
+      # app role ownership of `public` plus default privileges on anything
+      # postgres creates here. Runs once, as postgres, at bootstrap only.
+      postInitApplicationSQL:
+        - ALTER SCHEMA public OWNER TO pinepods;
+        - GRANT ALL ON SCHEMA public TO pinepods;
+        - ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT ALL ON TABLES TO pinepods;
+        - ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT ALL ON SEQUENCES TO pinepods;
+        - ALTER DEFAULT PRIVILEGES FOR ROLE postgres GRANT ALL ON FUNCTIONS TO pinepods;
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  resources:
+    requests:
+      memory: 500Mi
+      cpu: 500m
+    limits:
+      memory: 500Mi
+  storage:
+    size: 10Gi
+    storageClass: local-path

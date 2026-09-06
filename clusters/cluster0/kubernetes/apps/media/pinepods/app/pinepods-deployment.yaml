@@ -1,0 +1,121 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pinepods
+  namespace: media
+  labels:
+    app: pinepods
+spec:
+  # Single replica: the container runs the whole PinePods stack (web, API,
+  # task workers) under horust and holds download/backup state on RWO volumes.
+  replicas: 1
+  strategy:
+    # RWO ceph-block volumes cannot be attached to two pods at once.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: pinepods
+  template:
+    metadata:
+      labels:
+        app: pinepods
+    spec:
+      containers:
+        - name: pinepods
+          image: madeofpendletonwool/pinepods:0.9.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8040
+              protocol: TCP
+          env:
+            - name: TZ
+              value: "America/Detroit"
+            # Public URL; used for RSS feed absolute links and share URLs.
+            - name: SERVER_URL
+              value: "https://pinepods.gregbob.net"
+            - name: HOSTNAME
+              value: "https://pinepods.gregbob.net"
+            # Behind the wildcard-gregbob-net gateway, which terminates TLS.
+            - name: REVERSE_PROXY
+              value: "true"
+            - name: PROXY_PROTOCOL
+              value: "https"
+            - name: PINEPODS_PORT
+              value: "8040"
+            # Hosted search / people APIs (the upstream defaults); no API key
+            # needed. Self-hosting these is optional and not done here.
+            - name: SEARCH_API_URL
+              value: "https://search.pinepods.online/api/search"
+            - name: PEOPLE_API_URL
+              value: "https://people.pinepods.online/api/hosts"
+            # CloudNativePG read-write service for the `pinepods` cluster.
+            - name: DB_TYPE
+              value: "postgresql"
+            - name: DB_HOST
+              value: "cnpg-pinepods-rw.cnpg-system.svc.cluster.local"
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: "pinepods"
+            - name: DB_USER
+              value: "pinepods"
+            - name: VALKEY_HOST
+              value: "pinepods-valkey.media.svc.cluster.local"
+            - name: VALKEY_PORT
+              value: "6379"
+            - name: FULLNAME
+              value: "Pinepods Admin"
+            - name: DEBUG_MODE
+              value: "false"
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+          envFrom:
+            # DB_PASSWORD plus the first-boot admin account (USERNAME,
+            # PASSWORD, EMAIL). FULLNAME is non-secret and set below.
+            - secretRef:
+                name: pinepods-secrets
+          volumeMounts:
+            # Episode downloads land on the shared NFS media export, same
+            # storage jellyfin uses, under the existing podcasts directory.
+            # The export is root_squash; PUID/PGID 1000 above match the owner
+            # of /tank/media, so writes succeed (upstream's startup script
+            # tolerates the failed recursive chown on NFS).
+            - name: media
+              mountPath: /opt/pinepods/downloads
+              subPath: tank/media/podcasts
+            - name: backups
+              mountPath: /opt/pinepods/backups
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 120
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/pinepods_check
+              port: http
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      volumes:
+        - name: media
+          persistentVolumeClaim:
+            claimName: media-pvc
+        - name: backups
+          persistentVolumeClaim:
+            claimName: pinepods-backups

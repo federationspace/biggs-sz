@@ -21,3 +21,4 @@ resources:
   - ./media-storage/ks.yaml
   - ./epub-only/ks.yaml
   - ./romm/ks.yaml
+  - ./pinepods/ks.yaml
