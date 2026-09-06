@@ -78,8 +78,14 @@ spec:
             - secretRef:
                 name: pinepods-secrets
           volumeMounts:
-            - name: downloads
+            # Episode downloads land on the shared NFS media export, same
+            # storage jellyfin uses, under the existing podcasts directory.
+            # The export is root_squash; PUID/PGID 1000 above match the owner
+            # of /tank/media, so writes succeed (upstream's startup script
+            # tolerates the failed recursive chown on NFS).
+            - name: media
               mountPath: /opt/pinepods/downloads
+              subPath: tank/media/podcasts
             - name: backups
               mountPath: /opt/pinepods/backups
           resources:
@@ -107,9 +113,9 @@ spec:
       dnsPolicy: ClusterFirst
       restartPolicy: Always
       volumes:
-        - name: downloads
+        - name: media
           persistentVolumeClaim:
-            claimName: pinepods-downloads
+            claimName: media-pvc
         - name: backups
           persistentVolumeClaim:
             claimName: pinepods-backups
