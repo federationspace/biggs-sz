@@ -28,7 +28,7 @@ spec:
     # (see PR #47). Revisit when intentionally upgrading to Tentacle.
     cephImage:
       repository: quay.io/ceph/ceph
-      tag: v19.2.6
+      tag: v21.1.0
     cephClusterSpec:
       healthCheck:
         livenessProbe:
