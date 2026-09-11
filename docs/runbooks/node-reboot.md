@@ -3,15 +3,15 @@
 Written after the 2026-08-28 reboot, where `control-00` and `worker-05` both
 hung in late shutdown and had to be recovered the hard way.
 
-> **Status as of 2026-09-11: Fix 1 is procedure you can follow today. Fixes 2-4
-> are NOT yet applied.** Verified on all four nodes: no
-> `kubelet.conf.d/10-graceful-shutdown.conf`, no `/etc/systemd/logind.conf.d/`,
-> no kubelet inhibitor lock in `systemd-inhibit --list`, and control-00 still has
-> 8 `hard` self-NFS mounts with `nfs-server` active. The cluster is therefore
-> still exposed to the failure below. Fix 2 is a prerequisite for
-> `.hermes/plans/2026-09-05_143000-nut-ups-raspberry-pi-graceful-shutdown.md`
-> (its Phase 0), and should be proven with a single worker-05 test reboot before
-> any automated shutdown is armed.
+> **Status as of 2026-09-11: Fix 2 is APPLIED on all four nodes and verified by
+> live reboot test.** `InhibitDelayMaxSec=180` and kubelet's shutdown inhibitor
+> lock are confirmed present cluster-wide. Fixes 1 and 4 are procedure. Fix 3
+> (control-00 loopback NFS) is untouched and unproven; it only gets exercised
+> when control-00 itself reboots.
+>
+> Two undrained reboot tests on 2026-09-11 confirmed the original failure is
+> gone. See "Verification results" below, including a **hardware fault on
+> worker-05** found during testing.
 
 ## Why nodes hang on reboot
 
@@ -76,15 +76,17 @@ Order matters: **reboot control-00 last**, and only once every worker is back
 `Ready` with quorum restored. It hosts mon-a, the NFS export, and the ZFS pool;
 if it goes down first, everything else loses its storage backend mid-shutdown.
 
-These boxes have a genuinely slow POST of roughly 7 minutes. That is normal, not
-a hang. Compare against each node's own history before concluding it is stuck:
+The dark-gap numbers below are from the 2026-08-28 incident, when Fix 2 was not
+yet applied. **Treat the "normal" column as historical, not as a target:** with
+graceful shutdown in place, worker-01 came back in **20.1s** (see "Verification
+results"). The multi-minute gaps were stalled shutdowns, not POST time.
 
-| Node | Normal dark gap | 2026-08-28 |
+| Node | Dark gap 2026-08-28 | Then-current baseline |
 |---|---|---|
-| worker-00 | 4.8 - 7.2 min | 7.2 min (fine) |
-| worker-01 | 7.3 - 7.4 min | 7.4 min (fine) |
-| worker-05 | 0.6 - 9.0 min | **17.3 min (hung)** |
-| control-00 | ~4 min | **~17 min (hung)** |
+| worker-00 | 7.2 min | 4.8 - 7.2 min |
+| worker-01 | 7.4 min | 7.3 - 7.4 min |
+| **worker-05** | **17.3 min** | 0.6 - 9.0 min |
+| **control-00** | **~17 min** | ~4 min |
 
 ## Fix 2: enable kubelet graceful node shutdown
 
@@ -92,7 +94,20 @@ This is the real fix for factor 2. It makes kubelet take a systemd inhibitor
 lock, evict pods, and unmount volumes *before* the network goes away.
 
 k3s already passes `--config-dir=/var/lib/rancher/k3s/agent/etc/kubelet.conf.d`,
-so drop a file in there on **every node**:
+and ships its own `00-k3s-defaults.conf` in that directory which contains:
+
+```yaml
+shutdownGracePeriod: 0s
+shutdownGracePeriodCriticalPods: 0s
+```
+
+**k3s actively disables graceful node shutdown**; it is not merely unset. That is
+the direct cause of the 2026-08-28 behaviour: kubelet was configured to do
+nothing on shutdown. Our file must therefore sort *after* `00-*`, hence the `10-`
+prefix. k3s regenerates `00-k3s-defaults.conf` on start but does not touch our
+file, so this survives a k3s restart; still re-check after a k3s upgrade.
+
+Drop this in on **every node**:
 
 `/var/lib/rancher/k3s/agent/etc/kubelet.conf.d/10-graceful-shutdown.conf`
 
@@ -161,7 +176,7 @@ wins and pods get killed mid-flush anyway.
 Verify it took effect:
 
 ```sh
-# Should report 180s, not 5s
+# Should report t 180000000, not t 30000000 (vendor default) or t 5000000
 busctl get-property org.freedesktop.login1 /org/freedesktop/login1 \
   org.freedesktop.login1.Manager InhibitDelayMaxUSec
 
@@ -253,6 +268,107 @@ is filling up", not "Ceph is running out of room". Readable offenders are
 `/var/log` at 2.1G (1.2G of which is journal) and `/var/lib/rancher` at 897M;
 `du` undercounts as a non-root user, so check with sudo before concluding.
 `journalctl --vacuum-size=200M` is the easy win.
+
+## Verification results (2026-09-11)
+
+Fix 2 was applied to all four nodes and tested with **undrained** reboots. Not
+draining is deliberate: a drain empties the node first and therefore hides the
+very mechanism under test, and a real power event will not drain either.
+
+### worker-01, the clean benchmark
+
+21 pods running, including `mon-d` and `osd.1`. Rebooted with no drain and no
+human intervention:
+
+```
+22:01:16.159  "Node became not ready" reason="KubeletNotReady"
+              message="node is shutting down"                        (+0.0s)
+22:01:17.857  "Pod admission denied" reason="NodeShutdown"
+22:04:16      Delay lock is active (PID 836/unattended-upgr)
+              but inhibitor timeout is reached
+22:04:18.569  Reached target reboot.target
+22:04:18.621  systemd-shutdown[1]: Syncing filesystems and block devices.
+```
+
+| Measure | Result |
+|---|---|
+| Time to go dark | 183.6s |
+| **Dark gap (power-off to responding)** | **20.1s** |
+| libceph errors during shutdown | **0** |
+| Human intervention | **none** |
+
+**The 20.1s dark gap is the headline number.** The "~7 minute POST" in the table
+above was never POST; it was the machine sitting in a stalled shutdown. A
+healthy node on this hardware is back in about 20 seconds.
+
+### The 180s is unattended-upgrades, not kubelet
+
+Both test reboots showed the same thing: `systemd-logind` reports the delay lock
+held by **`unattended-upgr`**, not kubelet, and times it out at exactly 180s.
+Kubelet marks the node NotReady within ~25ms and finishes its work in seconds.
+
+So raising `InhibitDelayMaxSec` to 180s also extended *unattended-upgrades'*
+window from 30s to 180s. That is a real cost of roughly 3 minutes added to every
+reboot, and it matters for the UPS battery budget in the NUT plan. Options, if
+that becomes a problem:
+
+```sh
+# Before a planned reboot:
+sudo systemctl stop unattended-upgrades
+```
+
+Do not lower `InhibitDelayMaxSec` below `shutdownGracePeriod` to solve this; that
+re-breaks kubelet. A per-service cap for unattended-upgrades is the correct fix
+if one is needed.
+
+### worker-05 has a hardware thermal fault
+
+worker-05 could not complete either test unassisted and needed a physical power
+button press both times. The console showed:
+
+```
+warning: system has recovered from an over-temperature condition
+```
+
+Thermal comparison across the cluster, all at or near idle:
+
+| Node | CPU | pkg temp | PCH | throttle events/hr |
+|---|---|---|---|---|
+| control-00 | Xeon E5-2620 v4 | 42 C | - | **0** |
+| worker-00 | i7-1360P (13th gen) | 51 C | - | **0** |
+| worker-01 | Core 3 100U | 46 C | - | **0** |
+| **worker-05** | **i5-8259U (28W mobile)** | **92 C** | **95 C** | **~20,717** |
+
+worker-05 accumulated 1889 throttle events in its first two minutes of uptime and
+continues throttling at roughly 2/second while essentially idle. It runs a Ceph
+OSD plus general workload on a 28W laptop-class chip.
+
+This is very likely a contributing cause of the original 2026-08-28 incident, not
+merely a coincidence found later. Two pieces of prior evidence fit:
+
+- worker-05's Aug 28 log contains
+  `workqueue: ceph_con_workfn [libceph] hogged CPU for >10000us 1024 times`
+- its historical dark gaps were wildly erratic (0.6, 8.1, 3.5, 9.0, 17.3 min),
+  which is what a machine throttling to a crawl looks like
+
+Both things are true at once: the storage deadlock was the *mechanism*, and
+thermal throttling is plausibly why worker-05 was the node slow enough to hit it.
+
+**This is physical and unresolved.** Likely causes are a dust-clogged heatsink or
+fan, dried thermal paste, or inadequate case airflow. Until it is fixed, treat
+worker-05 as unable to reboot unattended and expect a console and a power button
+to be needed. Getting worker-05 to reboot cleanly on its own is tracked as
+separate work.
+
+Quick check on any node:
+
+```sh
+cat /sys/class/thermal/thermal_zone*/type /sys/class/thermal/thermal_zone*/temp
+cat /sys/devices/system/cpu/cpu0/thermal_throttle/package_throttle_count
+```
+
+A non-zero, *increasing* throttle count on an idle node means the hardware is
+overheating.
 
 ## Verifying a node actually shut down cleanly
 

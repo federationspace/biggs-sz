@@ -34,28 +34,105 @@ hand-rolled host-level work, not GitOps. Only the monitoring surface
 
 ## Current context and assumptions
 
-From memory, the repo, and `docs/runbooks/node-reboot.md`:
+From memory, the repo, `docs/runbooks/node-reboot.md`, and **live verification
+on-LAN (all facts below confirmed against the running cluster, not assumed):**
 
 | Fact | Value |
 |---|---|
 | Nodes | `control-00` 192.168.2.164, `worker-00` 192.168.2.204, `worker-01` 192.168.2.117, `worker-05` 192.168.2.84 |
-| Ceph mons | `mon-a` = control-00, `mon-d` = worker-01, `mon-f` = worker-00. **worker-05 has no mon.** |
-| control-00 special | k3s control plane, NFS server (exports to itself over 192.168.2.32), ZFS `tank` pool, mon-a. Must shut down **last**. |
-| SSH | LAN uses port **22** (port 20252 is external only and is refused on-LAN) |
-| control-00 journal | user is not in `adm`/`systemd-journal`; `dmesg_restrict=1`. Fix this early (Task 0.1) or you cannot diagnose the test reboots. |
-| POST time | ~7 min per node. Normal, not a hang. Matters for recovery expectations, not the shutdown budget. |
-| Observability | VictoriaMetrics k8s stack (`vmagent` `selectAllByDefault: true`), Grafana via `grafana-operator`, alertmanager enabled but routed to a `blackhole` receiver |
+| OS / k3s | **Ubuntu 24.04.5 LTS**, kernel 6.8.0-138, k3s **v1.34.3+k3s1**, containerd 2.1.5 — uniform across all four nodes |
+| Ceph mons | `mon-a` = **control-00**, `mon-d` = worker-01, `mon-f` = worker-00 (quorum a,d,f) |
+| Ceph OSDs | **osd.0 = worker-00, osd.1 = worker-01, osd.2 = worker-05. control-00 has NO OSD.** Failure domain is `host`. |
+| Ceph pools | `ceph-blockpool` and `.mgr`, both **size 3 / min_size 2** |
+| Ceph health | `HEALTH_ERR` — insecure cephx key types + **mon-a low on space**; 33/33 PGs `active+clean`, 3/3 OSDs up |
+| control-00 root fs | **75% full (88G used / 118G)** — this is what keeps mon-a complaining |
+| RBD volumes | **17 `ceph-block` PVs**, spread across ai-system, media, git-system, matrix, cnpg-system, renovate |
+| control-00 special | k3s control plane, NFS server (`/tank *(rw,sync,crossmnt,no_subtree_check)`), ZFS pool, mon-a. |
+| SSH | port **22** on-LAN. control-00's host key was not in `known_hosts`; ed25519 key now pinned. |
+| control-00 journal | groups are `szkud sudo users biggs gregbob` — **not** in `adm`/`systemd-journal`. Task 0.1 confirmed necessary. |
+| **Phase 0 status** | **NOT DONE on any node.** `kubelet.conf.d/` is absent on all four; `InhibitDelayMaxUSec` reads `t 30000000` (30s) everywhere; no kubelet inhibitor lock is held. |
+| POST time | ~7 min per node. Normal, not a hang. |
+| Observability | VictoriaMetrics k8s stack (`vmagent` `selectAllByDefault: true`), Grafana via `grafana-operator`, alertmanager default receiver `matrix-mercury` |
 | Secrets | External Secrets + ClusterSecretStore `onepassword-connect`, 1Password vault `biggs-sz` |
+| Branch | `feat/node-graceful-shutdown` (created; currently 7 commits behind `origin/main` — rebase before working) |
+| Alerting | **Already solved.** `matrix-alertmanager-receiver` is on `main`, alertmanager's default receiver is `matrix-mercury` → room `mercury`. UPS alerts will route with no extra bridge work. |
 
-**Assumptions to confirm before starting:**
-- The APC model is USB-attached and speaks HID Power Device Class (nearly all
-  modern Back-UPS/Smart-UPS do). Exact model determines `battery.charge.low`
-  granularity and whether `battery.runtime` is reported at all.
-- The Pi, **the network switch**, and all four nodes are on *battery-backed*
-  outlets, not the surge-only bank. If the switch is on surge-only, the Pi
-  loses its path to the nodes the instant mains drops and the entire design
-  fails silently.
-- All four nodes' BIOS/UEFI is set to **power on after AC loss** (see Task 0.4).
+---
+
+## ⚠ The wave order in the original plan was wrong. Here is why.
+
+The live OSD topology changes the design. Three OSDs, one on each worker,
+failure domain `host`, every pool `size 3 / min_size 2`:
+
+```
+worker-00  osd.0  mon-f
+worker-01  osd.1  mon-d
+worker-05  osd.2          <- has an OSD after all
+control-00        mon-a   <- no OSD, but 17 RBD volumes cluster-wide
+                             and the NFS server
+```
+
+**Powering off two workers drops Ceph below `min_size 2`.** At that moment all
+RBD I/O blocks cluster-wide. control-00 — which shuts down *last* and hosts a
+large share of those 17 RBD volumes plus the NFS export — is then asked to
+flush and unmount storage that has no quorum to write to. That is precisely
+the `libceph ... connect error -101` deadlock from 2026-08-28, except this time
+we would be *causing* it on purpose, on battery, with a clock running.
+
+The original three-wave order (worker-05 → worker-00 + worker-01 → control-00)
+walks straight into this. It was built on the assumption that worker-05 had no
+Ceph role; it has osd.2.
+
+**Corrected approach: evacuate storage first, then power off hosts.** Add a
+Wave 0 that stops the RBD and NFS *consumers* while Ceph is still fully healthy
+and all three OSDs are up. Once no pod holds an RBD mapping, the hosts can go
+down in any safe order without needing Ceph to be writable.
+
+| Wave | Action | Why |
+|---|---|---|
+| **0** | Scale down / cordon the RBD- and NFS-consuming workloads cluster-wide; wait for volumes to unmap | Everything flushes while quorum is 3/3 and all OSDs are up. This is the wave that actually prevents the hang. |
+| **1** | worker-05 (osd.2, no mon) | Losing one OSD keeps `min_size 2` satisfied and does not touch mon quorum. |
+| **2** | worker-00, worker-01 (staggered) | Ceph goes below `min_size` here — acceptable **only because** Wave 0 already unmapped every RBD. |
+| **3** | control-00 (mon-a, NFS, ZFS, control plane) | Last, as before. |
+
+Wave 0 costs time that Task 1.6's runtime budget must absorb, which is another
+reason the discharge measurement is a gate rather than a formality. If the
+budget is too tight to fit Wave 0, the honest answer is a bigger UPS, not a
+faster shutdown — skipping Wave 0 reintroduces the exact failure this whole
+project exists to prevent.
+
+> **Open design question this raises:** Wave 0 needs a working API server, and
+> the API server is on control-00. That is fine (control-00 dies last), but it
+> means the orchestrator's Wave 0 talks to k8s while Waves 1-3 talk over SSH.
+> The Pi therefore needs a read-limited kubeconfig in addition to the SSH key.
+> Alternative: skip Wave 0 and instead rely on kubelet graceful shutdown
+> (Phase 0) firing on each node in turn — simpler, but it only unmounts that
+> node's own volumes and does nothing for control-00's dependency on remote
+> OSDs. Decide before implementing Phase 3.
+
+## The UPS: APC Back-UPS Pro BX1500M
+
+| Spec | Value | Consequence |
+|---|---|---|
+| Capacity | 1500 VA / **900 W** | Ceiling for everything on battery |
+| Outlets | 10 total, **only 5 battery-backed** (5 are surge-only) | **The binding constraint — see Task 1.3** |
+| Interface | USB Type-B, HID Power Device Class | `usbhid-ups`, vendor ID `051d` |
+| Battery | 24 V, 2 × sealed lead acid, user-replaceable | `RB` alert matters; expect 3-5 year life |
+| Waveform | Simulated (stepped) sine wave | Fine for PC/server PSUs; noted for completeness |
+| APC's runtime figure | 68 min **@ 100 W** | Marketing load, not yours. See below. |
+
+**The 68-minute number is not your runtime.** Lead-acid discharge is
+non-linear (Peukert), so runtime collapses much faster than load rises. A
+realistic estimate for this cluster — NAS + 3 workers at roughly 350-450 W —
+is **8-12 minutes**, not an hour. That is enough for an ordered shutdown, but
+only just, and it is why Task 1.6's measurement is non-negotiable rather than
+a nicety.
+
+**Assumptions still to confirm:**
+- `battery.runtime` is reported by this model. Consumer Back-UPS units
+  sometimes omit it, and two alerts plus the LOWBATT logic depend on it.
+  Task 1.4 Step 9 settles this.
+- All four nodes' BIOS/UEFI is set to **power on after AC loss** (Task 0.4).
 
 ---
 
@@ -78,6 +155,24 @@ at Task 1.6, not at the end.
 ---
 
 # Phase 0: Prerequisites (hard gate — NUT is useless without these)
+
+> **Status 2026-09-11: Tasks 0.2 and 0.3 are DONE.** Graceful node shutdown is
+> applied and verified on all four nodes; worker-01 rebooted undrained, with no
+> intervention, in a 20.1s dark gap and zero libceph errors. Details in
+> `docs/runbooks/node-reboot.md` under "Verification results".
+>
+> **Two findings change Phase 3's numbers:**
+>
+> 1. **`unattended-upgrades`, not kubelet, consumes the 180s inhibitor window.**
+>    Kubelet finishes in seconds; logind then waits out unattended-upgrades and
+>    force-times-it-out at 180s. Budget ~3 min per node for this, or stop the
+>    service before an orchestrated shutdown.
+> 2. **worker-05 has an unresolved hardware thermal fault** (92 C package, 95 C
+>    PCH, ~20,717 throttle events/hr while idle) and **cannot currently reboot
+>    unattended**; it needed a physical power button press on both tests. The
+>    wave-1 design assumes worker-05 powers off on command. **That assumption
+>    does not hold today.** Do not arm the orchestrator until this is fixed, or
+>    the first real outage will stall on wave 1.
 
 The 2026-08-28 incident proves the nodes currently **do not shut down cleanly on
 their own**. Automating a shutdown that hangs just means the battery dies
@@ -243,21 +338,72 @@ restoring power; it should boot unattended.
 
 **Objective:** Get a minimal, headless, SSH-reachable Pi on the LAN.
 
-**Step 1:** Flash **Raspberry Pi OS Lite (64-bit)** with Raspberry Pi Imager.
-In the Imager's advanced options set: hostname `nut-00`, enable SSH with your
-public key, set locale/timezone, and configure Wi-Fi only as a fallback — this
-box must be on **Ethernet**.
+**OS decision: Raspberry Pi OS Lite (64-bit), current release, Debian 13
+"trixie".**
 
-**Step 2:** Prefer a USB SSD over an SD card if one is spare. This device will
-be writing logs during every power event and SD cards are the usual failure
-point in a box whose entire job is to be alive when everything else is not.
+Why this and not the alternatives:
+
+| Option | Verdict |
+|---|---|
+| **Raspberry Pi OS Lite 64-bit (trixie)** | **Chosen.** First-party kernel and firmware for Pi 4, no desktop, `nut` 2.8.1 in the archive, longest-tail of NUT-on-Pi documentation to match against when something misbehaves. |
+| Raspberry Pi OS Lite 32-bit | No. The Pi 4 is 64-bit; the only reason to pick 32-bit is legacy binaries you do not have. |
+| Raspberry Pi OS **Desktop/Full** | No. A GUI on an appliance is attack surface, RAM, and SD writes for zero benefit; this box is headless forever. |
+| Ubuntu Server 24.04 LTS for Pi | Workable, but you gain nothing here and give up first-party firmware handling. NUT packaging is equivalent. |
+| DietPi | Tempting for minimalism, but it adds its own config layer between you and stock Debian, which is exactly the wrong trade for an appliance whose failure mode must be boring and debuggable at 3am. |
+| Pi OS **Legacy** (bookworm) | Only if trixie shows a driver problem with the BX1500M. Ships NUT 2.8.0. Keep as the fallback, do not start here. |
+
+Version facts, verified: current Raspberry Pi OS is Debian 13 (trixie), kernel
+6.18. `nut` in trixie is **2.8.1-5**; bookworm has 2.8.0-7. 2.8.1 is a good
+place to be — recent enough for current `usbhid-ups` APC fixes, old enough to
+have been shaken out.
+
+**Step 1:** Flash **Raspberry Pi OS Lite (64-bit)** with Raspberry Pi Imager.
+In the Imager's advanced options (gear icon) set:
+- hostname `nut-00`
+- enable SSH, **public-key only** (paste your key; do not enable password auth)
+- username `szkud` to match the nodes
+- locale/timezone to match the cluster
+- **skip Wi-Fi entirely** — this box must be on Ethernet. Wi-Fi is a second
+  way for the shutdown path to fail and buys nothing on a machine bolted next
+  to the UPS.
+
+**Step 2:** Prefer a **USB SSD over an SD card** if one is spare. This device
+writes logs during every power event, and SD cards are the usual failure point
+in a box whose entire job is to be alive when everything else is not. A dead SD
+card is a silently disarmed UPS.
 
 **Step 3:** Boot, then:
 
 ```sh
-ssh nut-00.local   # or the DHCP address
+ssh szkud@nut-00.local   # or the DHCP address
 sudo apt update && sudo apt full-upgrade -y && sudo reboot
 ```
+
+**Step 4: Verify** you are where you think you are:
+
+```sh
+cat /etc/os-release | head -2      # expect: Debian GNU/Linux 13 (trixie)
+uname -m                           # expect: aarch64
+apt-cache policy nut-server        # expect: 2.8.1-5 (or later)
+```
+
+**Step 5:** Reduce SD/SSD wear and make the box boring:
+
+```sh
+# The journal is the only thing this box writes regularly. Cap it.
+sudo mkdir -p /etc/systemd/journald.conf.d
+sudo tee /etc/systemd/journald.conf.d/10-size-limit.conf >/dev/null <<'EOF'
+[Journal]
+SystemMaxUse=200M
+EOF
+sudo systemctl restart systemd-journald
+```
+
+> **Do not enable unattended-upgrades on this box** without thinking it
+> through. An automatic `nut` upgrade that restarts `nut-server` mid-outage, or
+> an automatic reboot, is precisely the failure you are buying this Pi to
+> prevent. Patch it deliberately, on your schedule, with a `DRY_RUN=1` check
+> afterwards (Task 3.2 Step 4).
 
 ---
 
@@ -286,20 +432,64 @@ the rest of this plan.
 
 **Objective:** USB data link plus correct outlet placement.
 
-**Step 1:** Connect the UPS's USB-B port to a USB-A port on the Pi.
+> ## ⚠ The BX1500M has only 5 battery-backed outlets
+>
+> Ten outlets, **five** of which are battery backup; the other five are surge
+> protection only. Devices on the surge-only bank get **zero** runtime and go
+> dark the instant mains drops. APC's own manual lists "essential equipment
+> plugged into a SURGE ONLY outlet" as the first troubleshooting entry for "the
+> UPS does not provide power during an outage".
+>
+> You must protect **six** things: 4 nodes + Pi + switch. That is one more than
+> the UPS has battery outlets.
 
-**Step 2:** **Outlet audit.** On the battery-backed bank: all four nodes, the
-Pi, and the network switch. On the surge-only bank: nothing that matters. Write
-down which device is in which outlet.
+**Step 1: Resolve the outlet shortfall.** Six devices, five outlets. Options,
+best first:
 
-> If the switch is not battery-backed, the Pi cannot SSH to the nodes during an
-> outage and the orchestrator is dead weight. Verify this physically; do not
-> assume from the manual.
+1. **Put the Pi and the switch on one good outlet via a short power strip.**
+   Both are tiny loads (Pi 4 ≈ 5-7 W, a small switch ≈ 10-15 W), so a single
+   outlet carries them comfortably. This is the pragmatic homelab answer.
+   Daisy-chaining a *surge* strip into a UPS is discouraged by APC, but a plain
+   multi-outlet strip with no surge circuitry is electrically fine at this load.
+2. **Check whether any node can share.** If two nodes are low-draw, the same
+   trick applies, but measure first — a NAS with spinning disks is not a small
+   load.
+3. **Accept the risk on one device only if it is not on the shutdown path.**
+   Never the switch, never the Pi, never control-00.
 
-**Step 3: Verify** the Pi sees the device.
+The Pi and the switch are the two devices that absolutely cannot be on
+surge-only: without them there is no orchestration at all.
+
+**Step 2: Budget the load.** 900 W maximum. Add up the real draw of the four
+nodes (a NAS with disks plus three workers plausibly lands at 350-450 W) and
+confirm you are well under. Above ~80% load, runtime collapses and the
+`UpsLoadHigh` alert (Task 4.5) will tell you so.
+
+**Step 3:** Connect the UPS's USB-B port to a USB-A port on the Pi. Use the
+cable APC supplied; some third-party USB-B cables are charge-only and will look
+exactly like a broken UPS.
+
+**Step 4: Outlet audit — write it down.** Record which physical outlet holds
+which device, and which bank it is in. This table goes in the runbook (Task
+4.8); during an outage at 3am you will not want to be reverse-engineering it.
+
+| Bank | Outlet | Device |
+|---|---|---|
+| Battery | 1 | control-00 |
+| Battery | 2 | worker-00 |
+| Battery | 3 | worker-01 |
+| Battery | 4 | worker-05 |
+| Battery | 5 | strip → Pi (`nut-00`) + network switch |
+| Surge only | 6-10 | (nothing on the shutdown path) |
+
+**Step 5: Verify the outlet assignment physically, not from the label.** With
+the cluster idle, pull the mains plug for ~20 seconds and confirm nothing goes
+dark. Anything that reboots was on surge-only and must be moved.
+
+**Step 6: Verify** the Pi sees the device.
 
 ```sh
-lsusb | grep -i american
+lsusb | grep -i -E 'american|051d'
 ```
 Expected: a line containing `051d` (APC's vendor ID), e.g.
 `Bus 001 Device 004: ID 051d:0002 American Power Conversion Uninterruptible Power Supply`.
@@ -328,18 +518,33 @@ MODE=netserver
 **Step 3:** `/etc/nut/ups.conf`
 
 ```ini
+# Global: upsd refuses to serve data older than MAXAGE, so it must exceed
+# pollinterval or you get spurious "data stale" -> upsmon treats the UPS as
+# dead -> a phantom shutdown. Keep MAXAGE >= 2x pollinterval.
+maxretry = 3
+pollinterval = 15
+
 [apc]
     driver = usbhid-ups
     port = auto
+    # Match by vendor ID (051d = APC). The BX1500M is a HID Power Device; the
+    # driver picks the "APC HID" subdriver automatically.
     vendorid = 051d
-    desc = "APC UPS - biggs-sz rack"
+    desc = "APC Back-UPS Pro BX1500M - biggs-sz rack"
+    # Consumer APC Back-UPS units are well known for dropping their USB link
+    # under frequent polling, producing "data stale" / "Driver not connected".
+    # 15s polling plus the MAXAGE above is the widely-used mitigation.
     pollfreq = 15
-    # offdelay/ondelay: ondelay MUST be greater than offdelay on APC units or
-    # the driver refuses to start. These control the UPS power-cycle at the end
-    # of the shutdown sequence; ondelay is the wait before power returns.
+    # offdelay/ondelay control the end-of-sequence UPS power cut.
+    # On APC HID units ondelay MUST be greater than offdelay or the driver
+    # refuses to start with "invalid ondelay/offdelay".
+    # Both are rounded DOWN to a multiple of 60 on these units, so use exact
+    # multiples of 60 to get what you asked for.
     offdelay = 60
     ondelay = 120
 ```
+
+Also raise `MAXAGE` in `/etc/nut/upsd.conf` (Step 5) to match.
 
 **Step 4:** Start the driver alone first, before anything else. This is where
 model incompatibilities surface.
@@ -350,11 +555,20 @@ sudo upsdrvctl start
 Expected: `Using subdriver: APC HID 0.xx` and no errors. A permissions error
 here means the udev rules did not apply; `sudo udevadm control --reload && sudo udevadm trigger`, then replug the USB cable.
 
+If it fails, run it verbose to see the HID report walk:
+
+```sh
+sudo upsdrvctl -DD start 2>&1 | head -60
+```
+
 **Step 5:** `/etc/nut/upsd.conf` — listen on the LAN, not just loopback.
 
 ```ini
 LISTEN 127.0.0.1 3493
 LISTEN <PI_IP> 3493
+# Must exceed pollinterval (15s) or the BX1500M's occasional USB hiccup reads
+# as "data stale" and upsmon may act on a UPS it wrongly believes is dead.
+MAXAGE 25
 ```
 
 **Step 6:** `/etc/nut/upsd.users` — three accounts with distinct privileges.
@@ -624,17 +838,30 @@ and control-00's NFS/ZFS role, with a dry-run mode so it can be tested safely.
 #!/bin/bash
 # Ordered cluster shutdown for the biggs-sz k3s cluster, driven by NUT.
 #
-# Wave order is deliberate and derives from docs/runbooks/node-reboot.md:
-#   wave 1: worker-05  -- holds NO Ceph mon, so it can leave without touching quorum
-#   wave 2: worker-00, worker-01 -- mon-f and mon-d; staggered so quorum with
-#           mon-a survives while each flushes its RBD volumes
-#   wave 3: control-00 -- mon-a + NFS server + ZFS tank + k3s control plane.
-#           Everything else depends on it; it must be the last box standing.
+# WAVE ORDER RATIONALE (verified live, see the plan's topology section):
+#   osd.0=worker-00  osd.1=worker-01  osd.2=worker-05  (control-00 has NO OSD)
+#   mon-f=worker-00  mon-d=worker-01  mon-a=control-00
+#   ceph-blockpool + .mgr are both size 3 / min_size 2, failure domain = host.
 #
-# Each node's kubelet holds a 180s systemd inhibitor lock and evicts pods /
-# unmounts volumes before the network dies (Phase 0). We therefore do NOT run
-# `kubectl drain` here: it needs a working API server, adds minutes we do not
-# have on battery, and the inhibitor already does the important half.
+# The naive order (workers first, control-00 last) drops Ceph below min_size 2
+# the moment the SECOND worker powers off. From that point all RBD I/O blocks
+# cluster-wide -- and control-00, which still has to flush 17 RBD volumes and
+# tear down its NFS export, is left writing to storage that has no quorum.
+# That is the 2026-08-28 libceph -101 deadlock, self-inflicted, on battery.
+#
+# Hence WAVE 0: evacuate the storage CONSUMERS while Ceph is still fully
+# healthy (3/3 mons, 3/3 OSDs). Once nothing holds an RBD mapping, the hosts
+# can go down without needing Ceph to stay writable.
+#
+#   wave 0: scale down RBD/NFS-consuming workloads; wait for volumes to unmap
+#   wave 1: worker-05  -- osd.2, no mon; losing it keeps min_size 2 satisfied
+#   wave 2: worker-00, worker-01 -- mon-f/mon-d + osd.0/osd.1, staggered.
+#           Ceph drops below min_size here; safe ONLY because wave 0 ran.
+#   wave 3: control-00 -- mon-a + NFS server + ZFS tank + k3s control plane.
+#
+# Each node's kubelet also holds a 180s systemd inhibitor lock and evicts pods
+# before the network dies (Phase 0), which covers that node's own volumes.
+# Wave 0 covers the cross-node dependency that the inhibitor cannot.
 set -uo pipefail
 
 DRY_RUN="${DRY_RUN:-0}"
@@ -755,6 +982,9 @@ AT ONBATT * START-TIMER cluster-shutdown 300
 AT ONLINE * CANCEL-TIMER cluster-shutdown
 AT ONLINE * EXECUTE power-restored
 
+# Notify immediately on going to battery, well before any shutdown decision.
+AT ONBATT * EXECUTE notify-onbatt
+
 # Battery hit low before our timer did: go NOW, skip the remaining wait.
 AT LOWBATT * EXECUTE cluster-shutdown-now
 
@@ -768,19 +998,30 @@ AT REPLBATT * EXECUTE replbatt
 
 ```sh
 #!/bin/sh
+# NOTE: every branch that matters also calls ups-notify (Task 3.5), which posts
+# to Matrix directly from the Pi. That path deliberately does NOT depend on the
+# cluster, because during a real outage the cluster is the thing going away.
 case "$1" in
   cluster-shutdown|cluster-shutdown-now)
     logger -t upssched-cmd "NUT: sustained outage ($1) -- starting ordered cluster shutdown"
+    /usr/local/sbin/ups-notify "🚨 Sustained outage: starting ORDERED CLUSTER SHUTDOWN ($1). Charge $(upsc apc battery.charge 2>/dev/null)%, runtime $(upsc apc battery.runtime 2>/dev/null)s."
     /usr/local/sbin/nut-cluster-shutdown
+    ;;
+  notify-onbatt)
+    logger -t upssched-cmd "NUT: on battery"
+    /usr/local/sbin/ups-notify "⚡ Mains lost; UPS on battery. Charge $(upsc apc battery.charge 2>/dev/null)%, runtime $(upsc apc battery.runtime 2>/dev/null)s. Shutdown begins if this persists."
     ;;
   power-restored)
     logger -t upssched-cmd "NUT: mains restored, cluster shutdown timer cancelled"
+    /usr/local/sbin/ups-notify "✅ Mains restored; cluster shutdown cancelled. Charge $(upsc apc battery.charge 2>/dev/null)%."
     ;;
   commbad)
     logger -t upssched-cmd "NUT: lost communication with the UPS for 60s"
+    /usr/local/sbin/ups-notify "⚠️ Lost communication with the UPS for 60s. UPS state is now UNKNOWN; the shutdown path may be disarmed."
     ;;
   replbatt)
     logger -t upssched-cmd "NUT: UPS reports the battery needs replacement"
+    /usr/local/sbin/ups-notify "🔋 UPS reports REPLACE BATTERY. Runtime is no longer trustworthy."
     ;;
   *)
     logger -t upssched-cmd "NUT: unrecognised command: $1"
@@ -905,6 +1146,131 @@ expected and not a regression).
 
 **Step 7:** Restore the real `START-TIMER cluster-shutdown <tuned value>` from
 the Task 1.6 worksheet and restart `nut-monitor`.
+
+---
+
+### Task 3.5: Independent Matrix notification from the Pi
+
+**Objective:** Get an alert that **survives the cluster going down**. This is
+the only notification path that still works once the k3s nodes are off, and it
+is the one you will actually be reading during an outage.
+
+**Why this is separate from the cluster's alerting.** `matrix-alertmanager-receiver`
+already runs in `observability` and routes to the `mercury` room — that is
+excellent for trend alerts (battery aging, load creep) but it is *inside the
+thing being shut down*. Wave 3 powers off control-00, and from that moment the
+cluster cannot tell you anything, including that it shut down successfully. The
+Pi posts straight to continuwuity's client-server API with `curl`, so it needs
+no Python, no matrix SDK, and no cluster.
+
+**Prerequisite decision — reachability.** During an outage the Pi must reach
+continuwuity, which runs *in the cluster you are switching off*. Two honest
+consequences:
+
+- Messages sent at ONBATT and at shutdown-start **do** get through; the cluster
+  is still up at that point. These are the messages that matter most.
+- A message sent *after* wave 3 will fail. So the orchestrator posts its
+  "starting shutdown" message **first**, and the final "all waves complete"
+  message is best-effort.
+
+If you want an alert that works even when the cluster is fully dark, the
+notifier must target something off-cluster (a hosted Matrix homeserver, or
+ntfy.sh). Decide which you want; the script below supports either via
+`MATRIX_HOMESERVER`.
+
+**Step 1:** Create a dedicated Matrix user for the Pi. On continuwuity, register
+a user (e.g. `@ups-nut:gregbob.net`), log in once to obtain an access token, and
+invite it to the **mercury** room.
+
+```sh
+curl -s -XPOST 'https://matrix.gregbob.net/_matrix/client/v3/login' \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"m.login.password","identifier":{"type":"m.id.user","user":"ups-nut"},"password":"<PASSWORD>"}' \
+  | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["access_token"])'
+```
+
+> **The mercury room must stay unencrypted.** The existing
+> `matrix-alertmanager-receiver` config already states this: the bridge has no
+> E2EE support and an encrypted room swallows every alert. This `curl` notifier
+> has the same limitation, for the same reason.
+
+**Step 2:** Store the credentials on the Pi, root-readable only.
+
+```sh
+sudo tee /etc/nut/matrix-notify.env >/dev/null <<'EOF'
+MATRIX_HOMESERVER=https://matrix.gregbob.net
+MATRIX_TOKEN=<ACCESS_TOKEN>
+MATRIX_ROOM=!Sfg0hDmKySOk6uzvatx3Q7nz6YkHQBneFPtmY38zs9Y
+EOF
+sudo chmod 600 /etc/nut/matrix-notify.env
+sudo chown root:root /etc/nut/matrix-notify.env
+```
+
+The room ID above is `mercury`, copied from the receiver's ConfigMap on `main`.
+Note continuwuity's room IDs are bare hashes with no `:server` suffix; that is
+correct, not truncated.
+
+**Step 3:** Create `/usr/local/sbin/ups-notify`.
+
+```sh
+#!/bin/sh
+# Post a message to Matrix directly from the NUT Pi.
+#
+# Deliberately dependency-free (curl + sh only) and deliberately fail-soft:
+# a notification failure must NEVER abort the shutdown sequence, so every
+# path exits 0. Timeouts are short because this runs on battery.
+set -u
+MSG="${1:-UPS event}"
+ENV_FILE=/etc/nut/matrix-notify.env
+LOG_TAG=ups-notify
+
+[ -r "$ENV_FILE" ] || { logger -t "$LOG_TAG" "no $ENV_FILE; skipping notify"; exit 0; }
+# shellcheck disable=SC1090
+. "$ENV_FILE"
+
+HOST="$(hostname -s)"
+BODY="[$HOST] $MSG"
+
+# Random txn id so retries are not deduplicated by the server.
+TXN="$(date +%s)$$"
+
+ESCAPED=$(printf '%s' "$BODY" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+
+if curl -sS --max-time 10 -XPUT \
+  "${MATRIX_HOMESERVER}/_matrix/client/v3/rooms/${MATRIX_ROOM}/send/m.room.message/${TXN}" \
+  -H "Authorization: Bearer ${MATRIX_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d "{\"msgtype\":\"m.text\",\"body\":${ESCAPED}}" >/dev/null 2>&1
+then
+  logger -t "$LOG_TAG" "notified: $MSG"
+else
+  logger -t "$LOG_TAG" "NOTIFY FAILED (continuing anyway): $MSG"
+fi
+exit 0
+```
+
+```sh
+sudo install -m 0750 -o root -g root ups-notify /usr/local/sbin/ups-notify
+```
+
+**Step 4: Verify** — this posts a real message to mercury.
+
+```sh
+sudo /usr/local/sbin/ups-notify "test message from the NUT Pi, ignore"
+journalctl -t ups-notify -n 5 --no-pager
+```
+Expected: the message appears in the mercury room, and the journal shows
+`notified:`. If it shows `NOTIFY FAILED`, check the token and that the room is
+unencrypted.
+
+**Step 5: Verify fail-soft behaviour** — the important property.
+
+```sh
+sudo mv /etc/nut/matrix-notify.env /etc/nut/matrix-notify.env.bak
+sudo /usr/local/sbin/ups-notify "should not crash"; echo "rc=$?"
+sudo mv /etc/nut/matrix-notify.env.bak /etc/nut/matrix-notify.env
+```
+Expected: `rc=0`. A broken notifier must never block a shutdown.
 
 ---
 
@@ -1143,11 +1509,15 @@ spec:
 # Alerting rules for the UPS, evaluated by vmalert (observability/stack runs
 # selectAllByDefault: true, so this is auto-discovered).
 #
-# CAVEAT worth knowing before trusting these: alertmanager in this cluster
-# currently routes everything to the "blackhole" receiver, so these fire but
-# notify nobody. See the open question in the plan about adding a Matrix
-# receiver via continuwuity. Until then these are visible in the vmalert UI and
-# Grafana only.
+# CAVEAT worth knowing before trusting these: alertmanager's default receiver
+# is matrix-mercury, so these alerts DO reach the mercury room. But the
+# receiver pod runs in this cluster -- during a real outage it is one of the
+# things being shut down, so the later stages of an event are NOT reported
+# here. The Pi's own ups-notify (Task 3.5) is the path that survives.
+#
+# Severity routing already exists in the alertmanager config on main:
+# severity=critical gets group_wait 10s / repeat 4h; severity=info|none is
+# blackholed. The severities below are chosen to fit that routing.
 #
 # Second caveat: during a real outage the cluster is being shut down, so these
 # alerts stop firing partway through by design. The Pi's own syslog and
@@ -1532,35 +1902,46 @@ the cluster being shut down, so the Grafana view goes dark partway through a
 real event. This is fine as long as it is understood: the Pi's local log is the
 post-mortem record. Anything that must survive the cluster has to run on the Pi.
 
-**Alerts currently go nowhere.** Alertmanager routes to `blackhole`. Every
-`VMRule` in Task 4.5 will fire correctly into vmalert and Grafana and notify
-nobody. Worth fixing, but it is a separate change.
+**Cluster alerts stop mid-event, by construction.** Alertmanager's default
+receiver is `matrix-mercury`, so UPS `VMRule`s do reach the mercury room — but
+the receiver pod is inside the cluster being shut down. Expect the Matrix
+thread to go quiet partway through a real outage. Task 3.5's Pi-side notifier
+is what covers the gap; the two are complementary, not redundant.
+
+**Only 5 of the BX1500M's 10 outlets are battery-backed**, and six devices need
+protection. Task 1.3 resolves this with a strip for the two small loads (Pi +
+switch), but it is the single most likely thing to get quietly wrong during a
+rack reshuffle months from now, and the failure is invisible until an outage.
+The runbook's outlet table exists for exactly this reason.
 
 **Brief blips cause a full shutdown if the timer is too aggressive.** A 30-second
 flicker should not take down the cluster; the `AT ONLINE * CANCEL-TIMER` rule
 handles that, but only if the ONBATT timer is longer than typical blip duration.
 Err long, subject to the runtime budget.
 
+**Consumer Back-UPS units drop their USB link.** "Data stale" / "Driver not
+connected" is a well-documented failure across the APC Back-UPS line. The
+`pollinterval 15` + `MAXAGE 25` pairing in Task 1.4 is the standard mitigation,
+and `DEADTIME 15` on the Pi means a genuine dead UPS is still caught. If it
+recurs anyway, `UpsExporterDown` and the `commbad` notifier will tell you
+before it matters.
+
 ---
 
 ## Open questions
 
-1. **Exact APC model?** It determines whether `battery.runtime` is reported (the
-   `UpsRuntimeBelowShutdownBudget` alert and the LOWBATT logic depend on it),
-   what `battery.charge.low` values the unit accepts, and the real runtime
-   ceiling. Run `upsc apc` at Task 1.4 Step 9 and revisit the timers.
-2. **Is the network switch on a battery-backed outlet?** If not, the entire
-   orchestration path is dead the moment mains drops. This needs a physical
-   check, not an assumption.
-3. **Should alertmanager get a real receiver?** The cluster runs continuwuity in
-   the `matrix` namespace; routing UPS alerts to a Matrix room would make them
-   actually useful, and would work from a phone during an outage. Out of scope
-   here, but this plan is a good reason to do it.
-4. **Should the Pi notify independently of the cluster?** During an outage the
-   cluster is going down, so cluster-based alerting cannot tell you what
-   happened. A small push notification from the Pi (ntfy, Matrix, e-mail) at
-   ONBATT/shutdown would be the only alert that survives the event.
-5. **Are the waves right, or should workers go in parallel?** The 3-wave order
+1. **Does the BX1500M report `battery.runtime`?** Two alerts and the runtime
+   budget depend on it. Consumer Back-UPS units sometimes expose only
+   `battery.charge`. Settled by `upsc apc` at Task 1.4 Step 9; if absent, swap
+   `UpsRuntimeBelowShutdownBudget` to a charge-percentage threshold.
+2. **Which outlet strategy for the 6-devices-into-5-outlets problem?** The plan
+   recommends a plain (non-surge) strip carrying the Pi and the switch on one
+   battery outlet. Confirm that matches what you actually want to wire.
+3. **Should the Pi's notifier target an off-cluster destination?** As written it
+   posts to continuwuity, which is *in* the cluster; messages land at ONBATT and
+   shutdown-start but not after wave 3. A hosted homeserver or ntfy.sh would
+   survive a fully dark cluster. Worth deciding before Task 3.5.
+4. **Are the waves right, or should workers go in parallel?** The 3-wave order
    is the conservative reading of the runbook. If Task 1.6 shows a tight runtime
    budget, collapsing waves 1 and 2 is the first thing to cut — Phase 0's
    graceful shutdown makes simultaneous worker shutdown much safer than it was
