@@ -3,15 +3,17 @@
 Written after the 2026-08-28 reboot, where `control-00` and `worker-05` both
 hung in late shutdown and had to be recovered the hard way.
 
-> **Status as of 2026-09-11: Fix 1 is procedure you can follow today. Fixes 2-4
-> are NOT yet applied.** Verified on all four nodes: no
-> `kubelet.conf.d/10-graceful-shutdown.conf`, no `/etc/systemd/logind.conf.d/`,
-> no kubelet inhibitor lock in `systemd-inhibit --list`, and control-00 still has
-> 8 `hard` self-NFS mounts with `nfs-server` active. The cluster is therefore
-> still exposed to the failure below. Fix 2 is a prerequisite for
-> `.hermes/plans/2026-09-05_143000-nut-ups-raspberry-pi-graceful-shutdown.md`
-> (its Phase 0), and should be proven with a single worker-05 test reboot before
-> any automated shutdown is armed.
+> **Status as of 2026-09-11: Fixes 2 and 3 are APPLIED and VERIFIED on all four
+> nodes.** Undrained reboots of worker-01, worker-00 and control-00 all completed
+> with no human intervention and zero libceph errors. Fix 1 is procedure; Fix 4
+> is informational.
+>
+> Two open items, both out of scope for this work:
+> - **worker-05 has a hardware thermal fault** and cannot reboot unattended.
+> - **control-00 wastes 2 min per boot** on an unplugged NIC (netplan one-liner).
+>
+> Full narrative and the permanent host changes are in
+> `docs/postmortems/2026-08-28-node-shutdown-hang.md`.
 
 ## Why nodes hang on reboot
 
@@ -76,15 +78,17 @@ Order matters: **reboot control-00 last**, and only once every worker is back
 `Ready` with quorum restored. It hosts mon-a, the NFS export, and the ZFS pool;
 if it goes down first, everything else loses its storage backend mid-shutdown.
 
-These boxes have a genuinely slow POST of roughly 7 minutes. That is normal, not
-a hang. Compare against each node's own history before concluding it is stuck:
+The dark-gap numbers below are from the 2026-08-28 incident, when Fix 2 was not
+yet applied. **Treat the "normal" column as historical, not as a target:** with
+graceful shutdown in place, worker-01 came back in **20.1s** (see "Verification
+results"). The multi-minute gaps were stalled shutdowns, not POST time.
 
-| Node | Normal dark gap | 2026-08-28 |
+| Node | Dark gap 2026-08-28 | Then-current baseline |
 |---|---|---|
-| worker-00 | 4.8 - 7.2 min | 7.2 min (fine) |
-| worker-01 | 7.3 - 7.4 min | 7.4 min (fine) |
-| worker-05 | 0.6 - 9.0 min | **17.3 min (hung)** |
-| control-00 | ~4 min | **~17 min (hung)** |
+| worker-00 | 7.2 min | 4.8 - 7.2 min |
+| worker-01 | 7.4 min | 7.3 - 7.4 min |
+| **worker-05** | **17.3 min** | 0.6 - 9.0 min |
+| **control-00** | **~17 min** | ~4 min |
 
 ## Fix 2: enable kubelet graceful node shutdown
 
@@ -92,7 +96,20 @@ This is the real fix for factor 2. It makes kubelet take a systemd inhibitor
 lock, evict pods, and unmount volumes *before* the network goes away.
 
 k3s already passes `--config-dir=/var/lib/rancher/k3s/agent/etc/kubelet.conf.d`,
-so drop a file in there on **every node**:
+and ships its own `00-k3s-defaults.conf` in that directory which contains:
+
+```yaml
+shutdownGracePeriod: 0s
+shutdownGracePeriodCriticalPods: 0s
+```
+
+**k3s actively disables graceful node shutdown**; it is not merely unset. That is
+the direct cause of the 2026-08-28 behaviour: kubelet was configured to do
+nothing on shutdown. Our file must therefore sort *after* `00-*`, hence the `10-`
+prefix. k3s regenerates `00-k3s-defaults.conf` on start but does not touch our
+file, so this survives a k3s restart; still re-check after a k3s upgrade.
+
+Drop this in on **every node**:
 
 `/var/lib/rancher/k3s/agent/etc/kubelet.conf.d/10-graceful-shutdown.conf`
 
@@ -161,7 +178,7 @@ wins and pods get killed mid-flush anyway.
 Verify it took effect:
 
 ```sh
-# Should report 180s, not 5s
+# Should report t 180000000, not t 30000000 (vendor default) or t 5000000
 busctl get-property org.freedesktop.login1 /org/freedesktop/login1 \
   org.freedesktop.login1.Manager InhibitDelayMaxUSec
 
@@ -178,19 +195,32 @@ that Flux will not restore for you.
 
 ## Fix 3: control-00's loopback NFS
 
+**RESOLVED 2026-09-11 by Fix 2.** control-00's undrained reboot showed kubelet
+releasing all 12 loopback NFS and 22 RBD mounts before nfsd stopped, with zero
+libceph errors and no D-state processes afterwards. See "control-00, the hard
+case" under Verification results. The remaining text explains *why* it was
+believed risky and why option 1 turned out to be sufficient.
+
 control-00 is both the NFS server and an NFS client of itself. `192.168.2.32`
 is its own NIC (`enp2s0f0`); its cluster identity is `192.168.2.164`.
 
 Current state:
 
 - 11 RBD devices
-- 8 `hard` NFS mounts from `192.168.2.32:/`, its own address
+- 12 `hard` NFS mounts from `192.168.2.32:/`, its own address
 - `nfs-server` active locally
 - hosts mon-a and the `tank` ZFS pool
 
-When nfsd is torn down during shutdown, `hard` mounts retry forever against a
-server that no longer exists. This is the classic loopback-NFS shutdown
-deadlock, stacked on top of the Ceph problem worker-05 had.
+In the general case, when nfsd is torn down during shutdown, `hard` mounts retry
+forever against a server that no longer exists: the classic loopback-NFS
+deadlock. Two things prevent that here, both verified on the node:
+
+1. **Every one of those mounts is kubelet-managed** (under `/var/lib/kubelet/`),
+   so kubelet's 180s inhibitor covers all of them. None are system-level `fstab`
+   mounts, which is what would have been genuinely dangerous.
+2. **`nfs-server` has `DefaultDependencies=no` and no `Conflicts=shutdown.target`**,
+   so systemd does not stop it early; it keeps serving until late in shutdown,
+   after kubelet has already unmounted.
 
 Seven media pods on control-00 mount `media-pvc` this way: `epub-only`,
 `lidarr`, `radarr`, `readarr`, `romm`, `sabnzbd`, `sonarr`. The PV is
@@ -201,19 +231,17 @@ corruption on a media library. Keep `hard`.
 
 Options, in order of preference:
 
-1. **Fix 2 largely resolves this.** With graceful shutdown, pods terminate and
-   volumes unmount while nfsd is still running. Do this first and re-test.
+1. **Fix 2 resolves this.** Confirmed by the 2026-09-11 reboot: pods terminate
+   and volumes unmount while nfsd is still running.
 2. **Give control-00-local pods a local volume instead.** Since control-00 *is*
    the NAS and `/tank` is local to it, routing its own pods over loopback NFS
-   buys nothing but latency and this deadlock. A `local` PV pinned to control-00
-   would remove the loopback entirely. The tradeoff is real: `media-pvc` is RWX
-   and shared across nodes, so this means splitting the volume story between
+   buys nothing but latency. Still worth doing on latency grounds alone, but it
+   is no longer a correctness issue. The tradeoff is real: `media-pvc` is RWX and
+   shared across nodes, so this means splitting the volume story between
    control-00 and the workers, not a one-line change.
 3. **Pin the media pods to workers.** Simplest, but it defeats the deliberate
    design of staging downloads locally on the NAS and moving them to the ZFS
    pool without crossing the 1GbE link.
-
-I would do 1, verify with a test reboot, and only take on 2 if it still hangs.
 
 ## Fix 4: Ceph is unhealthy right now
 
@@ -253,6 +281,205 @@ is filling up", not "Ceph is running out of room". Readable offenders are
 `/var/log` at 2.1G (1.2G of which is journal) and `/var/lib/rancher` at 897M;
 `du` undercounts as a non-root user, so check with sudo before concluding.
 `journalctl --vacuum-size=200M` is the easy win.
+
+## Verification results (2026-09-11)
+
+Fix 2 was applied to all four nodes and tested with **undrained** reboots. Not
+draining is deliberate: a drain empties the node first and therefore hides the
+very mechanism under test, and a real power event will not drain either.
+
+### worker-01, the clean benchmark
+
+21 pods running, including `mon-d` and `osd.1`. Rebooted with no drain and no
+human intervention:
+
+```
+22:01:16.159  "Node became not ready" reason="KubeletNotReady"
+              message="node is shutting down"                        (+0.0s)
+22:01:17.857  "Pod admission denied" reason="NodeShutdown"
+22:04:16      Delay lock is active (PID 836/unattended-upgr)
+              but inhibitor timeout is reached
+22:04:18.569  Reached target reboot.target
+22:04:18.621  systemd-shutdown[1]: Syncing filesystems and block devices.
+```
+
+| Measure | Result |
+|---|---|
+| Time to go dark | 183.6s |
+| **Dark gap (power-off to responding)** | **20.1s** |
+| libceph errors during shutdown | **0** |
+| Human intervention | **none** |
+
+**The 20.1s dark gap is the headline number.** The "~7 minute POST" in the table
+above was never POST; it was the machine sitting in a stalled shutdown. A
+healthy node on this hardware is back in about 20 seconds.
+
+### worker-00, confirming second data point
+
+40 pods, roughly double worker-01, including `mon-f`, `osd.0`, `rook-ceph-tools`
+and **5 CNPG PostgreSQL primaries**. Also undrained, also unattended:
+
+| Measure | worker-01 | worker-00 |
+|---|---|---|
+| Pods (no drain) | 21 | 40 |
+| kubelet reacted | +25ms | +0ms |
+| Time to go dark | 183.6s | 183.6s |
+| **Dark gap** | **20.1s** | **20.1s** |
+| libceph errors during shutdown | 0 | 0 |
+
+Byte-identical timings under nearly double the load. All seven CNPG clusters
+returned `Cluster in healthy state` with new primaries elected; Ceph was back to
+`33 active+clean` within ~60s.
+
+### control-00, the hard case
+
+Single control plane, `mon-a`, the NFS server, the ZFS pool, 78 pods, 12 loopback
+NFS mounts and 22 RBD mounts. Rebooted undrained with **no intervention**:
+
+| Measure | Result |
+|---|---|
+| Volume `TearDown succeeded` | **436** |
+| `NodeShutdown` admission denials | 191 |
+| libceph errors during power-down | **0** |
+| D-state processes after boot | **none** |
+| Dark gap | 169s (see boot-time finding below) |
+| Kernel | 6.8.0-138 -> 6.8.0-139 |
+
+**This proves Fix 3.** The loopback NFS teardown ordered correctly, with no
+deadlock:
+
+```
+22:52:50  Stopped rpc-statd / nfs-mountd / fsidd
+22:52:50  Stopped target nfs-client.target
+22:52:53  Unmounted tank-media.mount
+22:52:53  Unmounted tank.mount
+22:52:54  Reached target reboot.target
+```
+
+kubelet released every loopback NFS and RBD mount *before* nfsd went away. The
+mechanism that made this safe is that **all 34 mounts are kubelet-managed**;
+none are system-level, so the 180s inhibitor covers all of them. Two ordering
+facts also help: `nfs-server` has `DefaultDependencies=no` and no
+`Conflicts=shutdown.target`, so systemd does not stop it early.
+
+### control-00 wastes 2 minutes on an unplugged NIC
+
+Not a graceful-shutdown problem, but it dominates control-00's boot:
+
+```
+Startup finished in 14.995s (kernel) + 2min 39.070s (userspace)
+2min 139ms  systemd-networkd-wait-online.service   <- 76% of boot
+   20.686s  k3s.service
+```
+
+`/etc/netplan/00-installer-config.yaml` sets `dhcp4: true` on all four NICs, so
+netplan generates a wait-online override listing every one of them. `enp1s0f0`
+has no cable (`Link detected: no`, `no-carrier`), so networkd blocks for the full
+120s timeout and the unit ends in `failed`. The three NICs that matter
+(`enp1s0f1` 192.168.2.164, `enp2s0f0` 192.168.2.32 for NFS, `enp2s0f1`
+192.168.11.166) all come up `routable`.
+
+This is cosmetic for uptime but real for the UPS budget: 2 minutes of dead wait
+on battery, on the node that must come back last. Fix is one line in netplan,
+either dropping the unused interface or marking it optional:
+
+```yaml
+    enp1s0f0:
+        dhcp4: true
+        optional: true
+```
+
+Then `sudo netplan generate && sudo systemctl daemon-reload`. **Not yet applied**;
+changing control-plane networking deserves its own maintenance window.
+
+### Expect a pile of NodeShutdown pod records afterwards
+
+After every graceful shutdown the API server is left with `Failed` pods whose
+reason is `NodeShutdown`; 90 after worker-00, 172 after control-00, nearly all
+`cilium-operator`. These are **bookkeeping tombstones, not failures**. During the
+180s window the ReplicaSet keeps trying to place a pod on the departing node and
+kubelet correctly rejects each attempt, leaving a record per try.
+
+Verify the workload is actually fine, then clear them:
+
+```sh
+kubectl -n kube-system get ds cilium            # expect 4/4
+kubectl -n kube-system get deploy cilium-operator  # expect 2/2
+kubectl get pods -A --field-selector status.phase=Failed -o custom-columns=R:.status.reason --no-headers | sort | uniq -c
+kubectl delete pods -A --field-selector status.phase=Failed
+```
+
+The count scales with the length of the inhibitor window, so shortening the
+unattended-upgrades delay reduces it too.
+
+### The 180s is unattended-upgrades, not kubelet
+
+Both test reboots showed the same thing: `systemd-logind` reports the delay lock
+held by **`unattended-upgr`**, not kubelet, and times it out at exactly 180s.
+Kubelet marks the node NotReady within ~25ms and finishes its work in seconds.
+
+So raising `InhibitDelayMaxSec` to 180s also extended *unattended-upgrades'*
+window from 30s to 180s. That is a real cost of roughly 3 minutes added to every
+reboot, and it matters for the UPS battery budget in the NUT plan. Options, if
+that becomes a problem:
+
+```sh
+# Before a planned reboot:
+sudo systemctl stop unattended-upgrades
+```
+
+Do not lower `InhibitDelayMaxSec` below `shutdownGracePeriod` to solve this; that
+re-breaks kubelet. A per-service cap for unattended-upgrades is the correct fix
+if one is needed.
+
+### worker-05 has a hardware thermal fault
+
+worker-05 could not complete either test unassisted and needed a physical power
+button press both times. The console showed:
+
+```
+warning: system has recovered from an over-temperature condition
+```
+
+Thermal comparison across the cluster, all at or near idle:
+
+| Node | CPU | pkg temp | PCH | throttle events/hr |
+|---|---|---|---|---|
+| control-00 | Xeon E5-2620 v4 | 42 C | - | **0** |
+| worker-00 | i7-1360P (13th gen) | 51 C | - | **0** |
+| worker-01 | Core 3 100U | 46 C | - | **0** |
+| **worker-05** | **i5-8259U (28W mobile)** | **92 C** | **95 C** | **~20,717** |
+
+worker-05 accumulated 1889 throttle events in its first two minutes of uptime and
+continues throttling at roughly 2/second while essentially idle. It runs a Ceph
+OSD plus general workload on a 28W laptop-class chip.
+
+This is very likely a contributing cause of the original 2026-08-28 incident, not
+merely a coincidence found later. Two pieces of prior evidence fit:
+
+- worker-05's Aug 28 log contains
+  `workqueue: ceph_con_workfn [libceph] hogged CPU for >10000us 1024 times`
+- its historical dark gaps were wildly erratic (0.6, 8.1, 3.5, 9.0, 17.3 min),
+  which is what a machine throttling to a crawl looks like
+
+Both things are true at once: the storage deadlock was the *mechanism*, and
+thermal throttling is plausibly why worker-05 was the node slow enough to hit it.
+
+**This is physical and unresolved.** Likely causes are a dust-clogged heatsink or
+fan, dried thermal paste, or inadequate case airflow. Until it is fixed, treat
+worker-05 as unable to reboot unattended and expect a console and a power button
+to be needed. Getting worker-05 to reboot cleanly on its own is tracked as
+separate work.
+
+Quick check on any node:
+
+```sh
+cat /sys/class/thermal/thermal_zone*/type /sys/class/thermal/thermal_zone*/temp
+cat /sys/devices/system/cpu/cpu0/thermal_throttle/package_throttle_count
+```
+
+A non-zero, *increasing* throttle count on an idle node means the hardware is
+overheating.
 
 ## Verifying a node actually shut down cleanly
 
