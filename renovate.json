@@ -16,7 +16,7 @@
     "managerFilePatterns": ["/(^|/)clusters/.+\\.ya?ml$/"]
   },
   "helm-values": {
-    "managerFilePatterns": ["/(^|/)clusters/.+\\.ya?ml$/"]
+    "managerFilePatterns": ["/(^|/)clusters/.+/helmrelease\\.ya?ml$/"]
   },
   "kubernetes": {
     "managerFilePatterns": [
