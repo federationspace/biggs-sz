@@ -1,0 +1,44 @@
+---
+# Send Flux GitOps events to Mercury (same room as metric alerts).
+#
+# Flux's native Matrix provider posts an m.room.message text event to the
+# given room. It has no E2EE support, so Mercury must stay unencrypted.
+# The provider authenticates as @alertbot:gregbob.net using the token in
+# the flux-matrix-token Secret.
+apiVersion: notification.toolkit.fluxcd.io/v1beta3
+kind: Provider
+metadata:
+  name: matrix
+  namespace: flux-system
+spec:
+  type: matrix
+  # In-cluster CS API of continuwuity; bypasses the Cloudflare tunnel.
+  address: http://continuwuity-service.matrix.svc.cluster.local:8080
+  # Mercury room ID. A room ID is not a credential, so it is declared in
+  # Git deliberately, matching the MATRIX_HOME_ROOM convention in
+  # ai-system/hermes.
+  channel: "!Sfg0hDmKySOk6uzvatx3Q7nz6YkHQBneFPtmY38zs9Y"
+  secretRef:
+    name: flux-matrix-token
+---
+# Alert on Flux reconciliation failures. error only: this cluster
+# reconciles constantly, and since Mercury also carries every metric
+# alert, info-level Flux chatter would bury both.
+apiVersion: notification.toolkit.fluxcd.io/v1beta3
+kind: Alert
+metadata:
+  name: matrix-errors
+  namespace: flux-system
+spec:
+  providerRef:
+    name: matrix
+  eventSeverity: error
+  eventSources:
+    - kind: Kustomization
+      name: '*'
+    - kind: HelmRelease
+      name: '*'
+    - kind: GitRepository
+      name: '*'
+    - kind: HelmRepository
+      name: '*'
