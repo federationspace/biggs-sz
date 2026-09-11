@@ -136,8 +136,11 @@ spec:
         #       severity: critical
       # -- Rule group properties
       groups:
+        # k3s embeds etcd (or uses sqlite) in the server process and exposes no
+        # standalone etcd endpoint, so these rules have no data source. The
+        # matching kubeEtcd scrape is disabled below for the same reason.
         etcd:
-          create: true
+          create: false
           # -- Common properties for all rules in a group
           rules: {}
           # spec:
@@ -223,14 +226,26 @@ spec:
         kubernetesSystemApiserver:
           create: true
           rules: {}
+        # k3s embeds controller-manager and scheduler in the k3s server
+        # process. These groups contain KubeControllerManagerDown /
+        # KubeSchedulerDown, which fire PERMANENTLY here because the standalone
+        # scrape targets they check can never exist (the matching
+        # kubeControllerManager/kubeScheduler scrape configs are disabled below
+        # for the same reason). Two permanently-firing criticals train you to
+        # ignore criticals, so drop the groups rather than mute the symptom.
         kubernetesSystemControllerManager:
-          create: true
+          create: false
           rules: {}
+        # kubeScheduler here is the RECORDING-rule group
+        # (cluster_quantile:scheduler_*). Those recordings read scheduler_*
+        # series, which on k3s arrive via the apiserver scrape; that scrape was
+        # failing on maxScrapeSize, which is what produced RecordingRulesNoData.
+        # With the scrape fixed the data returns, so keep this group enabled.
         kubeScheduler:
           create: true
           rules: {}
         kubernetesSystemScheduler:
-          create: true
+          create: false
           rules: {}
         kubeStateMetrics:
           create: true
@@ -837,6 +852,17 @@ spec:
           # Do not store original labels in vmagent's memory by default. This reduces the amount of memory used by vmagent
           # but makes vmagent debugging UI less informative. See: https://docs.victoriametrics.com/victoriametrics/relabeling/#relabel-debugging
           promscrape.dropOriginalLabels: "true"
+          # 32MiB, up from the 16MiB default. Both the k3s apiserver
+          # (192.168.2.164:6443/metrics) and control-00's kubelet
+          # (:10250/metrics) exceed 16MiB and were failing EVERY scrape with
+          # "exceeds -promscrape.maxScrapeSize". That is why apiserver_* and
+          # scheduler_* series were entirely absent, which in turn starved the
+          # kube-apiserver-availability/burnrate/histogram and kube-scheduler
+          # recording-rule groups -> 15x RecordingRulesNoData, plus TargetDown,
+          # KubeAPIInstanceUnreachable and KubeletInstanceUnreachable.
+          # k3s runs apiserver+scheduler+controller-manager in ONE process, so
+          # its /metrics is the union of all three and is legitimately large.
+          promscrape.maxScrapeSize: "33554432"
       # -- (object) VMAgent ingress configuration
       ingress:
         enabled: false
@@ -1119,7 +1145,15 @@ spec:
     # Component scraping the kube controller manager
     kubeControllerManager:
       # -- Enable kube controller manager metrics scraping
-      enabled: true
+      #
+      # DISABLED: k3s runs the controller-manager INSIDE the k3s server
+      # process, not as a standalone pod listening on 10257. The Service
+      # selector (component=kube-controller-manager) matches nothing, so this
+      # scrape pool is permanently empty -> ScrapePoolHasNoTargets forever.
+      # Its metrics are already covered by the apiserver scrape, which serves
+      # the combined process. Also see defaultRules.groups below, where the
+      # matching alert group is disabled.
+      enabled: false
 
       # -- If your kube controller manager is not deployed as a pod, specify IPs it can be found on
       endpoints: []
@@ -1221,7 +1255,11 @@ spec:
     # Component scraping etcd
     kubeEtcd:
       # -- Enabled KubeETCD metrics scraping
-      enabled: true
+      #
+      # DISABLED: k3s uses embedded etcd (or sqlite) inside the server process
+      # and exposes no standalone etcd pod on 2379, so the selector
+      # (component=etcd) matches nothing and the pool is permanently empty.
+      enabled: false
 
       # -- If your etcd is not deployed as a pod, specify IPs it can be found on
       endpoints: []
@@ -1262,7 +1300,12 @@ spec:
     # Component scraping kube scheduler
     kubeScheduler:
       # -- Enable KubeScheduler metrics scraping
-      enabled: true
+      #
+      # DISABLED: same as controller-manager -- k3s embeds the scheduler in the
+      # server process, nothing listens on 10259, pool is permanently empty.
+      # scheduler_* metrics still arrive via the apiserver scrape (now that
+      # promscrape.maxScrapeSize is large enough to read it).
+      enabled: false
 
       # -- If your kube scheduler is not deployed as a pod, specify IPs it can be found on
       endpoints: []
