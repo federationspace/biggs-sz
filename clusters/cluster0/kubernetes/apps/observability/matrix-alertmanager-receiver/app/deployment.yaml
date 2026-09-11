@@ -20,7 +20,7 @@ spec:
       annotations:
         # The app reads its config file once at startup. Bump this whenever
         # configmap.yaml changes, in the same commit, to force a rollout.
-        config-revision: "1"
+        config-revision: "2"
     spec:
       automountServiceAccountToken: false
       enableServiceLinks: false
