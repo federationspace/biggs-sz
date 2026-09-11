@@ -1,0 +1,86 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: matrix-alertmanager-receiver
+  namespace: observability
+  labels:
+    app: matrix-alertmanager-receiver
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: matrix-alertmanager-receiver
+  template:
+    metadata:
+      labels:
+        app: matrix-alertmanager-receiver
+      annotations:
+        # The app reads its config file once at startup. Bump this whenever
+        # configmap.yaml changes, in the same commit, to force a rollout.
+        config-revision: "1"
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        # gcr.io/distroless/base-debian13 ships USER nonroot = 65532.
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: receiver
+          image: docker.io/metio/matrix-alertmanager-receiver:2026.8.26@sha256:f6235a5de611d099e05313c195e7af6722bd22cbe7d2e596482ca2adc51f9da7
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config-path
+            - /config/config.yaml
+            - --log-level
+            - info
+          # MATRIX_ACCESS_TOKEN / MATRIX_USER_ID / WEBHOOK_BASIC_PASSWORD.
+          # The config file references them as ${VAR} and the app expands them
+          # itself, so the ConfigMap holds no secrets.
+          envFrom:
+            - secretRef:
+                name: matrix-alertmanager-receiver
+          ports:
+            - name: http
+              containerPort: 9088
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+          # /metrics is enabled in the config and needs no auth (only the
+          # alerts path is behind basic auth), so it doubles as a health probe.
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+      volumes:
+        - name: config
+          configMap:
+            name: matrix-alertmanager-receiver

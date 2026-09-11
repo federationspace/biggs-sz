@@ -1,0 +1,73 @@
+---
+# metio/matrix-alertmanager-receiver configuration.
+#
+# ${VAR} placeholders are expanded from the process environment by the app
+# itself at parse time (internal/config/parser.go), so no secret text lives
+# here; the values arrive from the matrix-alertmanager-receiver Secret via
+# envFrom in deployment.yaml.
+#
+# The app reads this file ONCE at startup. Changing it therefore requires a
+# pod restart: bump the `config-revision` annotation in deployment.yaml in the
+# same commit, which rolls the Deployment the GitOps-clean way. (This repo
+# uses raw manifests with no inner kustomization.yaml, so there is no
+# configMapGenerator hash to do it automatically.)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: matrix-alertmanager-receiver
+  namespace: observability
+data:
+  config.yaml: |
+    http:
+      # address deliberately unset -> bind all interfaces, so the Service can
+      # reach the pod. Binding 127.0.0.1 (the upstream example) would make the
+      # readiness probe pass and every webhook POST fail.
+      port: 9088
+      alerts-path-prefix: /alerts
+      metrics-path: /metrics
+      metrics-enabled: true
+      basic-username: alertmanager
+      basic-password: ${WEBHOOK_BASIC_PASSWORD}
+    matrix:
+      # In-cluster client-server API of continuwuity; bypasses the Cloudflare
+      # tunnel entirely, same as ai-system/hermes does.
+      homeserver-url: http://continuwuity-service.matrix.svc.cluster.local:8080
+      user-id: ${MATRIX_USER_ID}
+      access-token: ${MATRIX_ACCESS_TOKEN}
+      # Pretty name -> room ID, so the Alertmanager config carries no room ID
+      # (it POSTs to /alerts/mercury). "mercury" is the Mercury room in the
+      # Hermitage space. A room ID is not a credential, so it is declared in
+      # Git deliberately -- same reasoning as MATRIX_HOME_ROOM in
+      # ai-system/hermes. Note continuwuity is on a room version whose IDs are
+      # bare hashes with no ":server" suffix; that is correct, not truncated.
+      #
+      # Mercury MUST stay unencrypted: this bridge has no E2EE support, and an
+      # encrypted room swallows every alert with only a log line to show.
+      room-mapping:
+        mercury: "!Sfg0hDmKySOk6uzvatx3Q7nz6YkHQBneFPtmY38zs9Y"
+    templating:
+      # vmalert and Alertmanager only know their in-cluster URLs; rewrite them
+      # to links that actually resolve from a phone.
+      external-url-mapping:
+        "http://vmalertmanager-stack.observability.svc:9093": https://grafana.gregbob.net
+      generator-url-mapping:
+        "http://vmalert-stack.observability.svc:8080": https://grafana.gregbob.net
+      # Everything lands in one room, so severity has to read off the message
+      # itself: critical red, warning orange, anything else yellow.
+      firing-template: '
+        {{ $color := "yellow" }}
+        {{ if eq .Alert.Labels.severity "warning" }}{{ $color = "orange" }}
+        {{ else if eq .Alert.Labels.severity "critical" }}{{ $color = "red" }}{{ end }}
+        <p>
+          <strong><font color="{{ $color }}">{{ .Alert.Status | ToUpper }}</font></strong>
+          {{ if .Alert.Labels.alertname }}<strong>{{ .Alert.Labels.alertname }}</strong>{{ end }}
+          {{ if .Alert.Labels.namespace }}({{ .Alert.Labels.namespace }}){{ end }}
+          &mdash;
+          {{ if .Alert.Annotations.description }}{{ .Alert.Annotations.description }}
+          {{ else if .Alert.Annotations.summary }}{{ .Alert.Annotations.summary }}{{ end }}
+          {{ if .Alert.Annotations.runbook_url }} <a href="{{ .Alert.Annotations.runbook_url }}">Runbook</a>{{ end }}
+        </p>'
+      resolved-template: '
+        <p><strong><font color="green">RESOLVED</font></strong>
+        {{ if .Alert.Labels.alertname }}<strong>{{ .Alert.Labels.alertname }}</strong>{{ end }}
+        {{ if .Alert.Labels.namespace }}({{ .Alert.Labels.namespace }}){{ end }}</p>'
