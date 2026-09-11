@@ -577,6 +577,15 @@ spec:
 
         # -- (string) If this one defined, it will be used for alertmanager configuration and config parameter will be ignored
         configSecret: ""
+
+        # Mount additional Secrets into the Alertmanager pod. VMAlertmanager
+        # mounts each named Secret at /etc/alertmanager/secrets/<name>/<key>.
+        # The matrix-mercury webhook receiver's password_file points here.
+        # This Secret is an ExternalSecret (see
+        # matrix-alertmanager-receiver/app/externalsecret.yaml) so the password
+        # never appears as a literal in the Helm values.
+        secrets:
+          - matrix-webhook
       # --
       # @raw
       # enable storing .Values.alertmanager.config in VMAlertmanagerConfig instead of k8s Secret.
@@ -586,109 +595,70 @@ spec:
       # - with `useManagedConfig: true` has structure described [here](https://docs.victoriametrics.com/operator/api/#vmalertmanagerconfig).
       useManagedConfig: false
       # -- (object) VMAlertmanager configuration
+      #
+      # Routes alerts to Mercury via the matrix-alertmanager-receiver bridge
+      # (observability/matrix-alertmanager-receiver). The bridge maps the
+      # pretty name "mercury" to the room ID in its config. Alertmanager has
+      # no native Matrix receiver, so a webhook bridge is required.
+      #
+      # Everything lands in one room; severity reads off the message colour in
+      # the bridge's firing template (critical red, warning orange). Critical
+      # gets a shorter group_wait so it is announced fast without room
+      # separation. Watchdog and InfoInhibitor are design-time canaries and go
+      # to blackhole, not Mercury.
       config:
         route:
-          receiver: "blackhole"
-        #   group_by: ["alertgroup", "job"]
-        #   group_wait: 30s
-        #   group_interval: 5m
-        #   repeat_interval: 12h
-        #   routes:
-        #
-        #     # Duplicate code_owner routes to teams
-        #     # These will send alerts to team channels but continue
-        #     # processing through the rest of the tree to handled by on-call
-        #     - matchers:
-        #         - code_owner_channel!=""
-        #         - severity=~"info|warning|critical"
-        #       group_by: ["code_owner_channel", "alertgroup", "job"]
-        #       receiver: slack-code-owners
-        #
-        #     # Standard on-call routes
-        #     - matchers:
-        #         - severity=~"info|warning|critical"
-        #       receiver: slack-monitoring
-        #       continue: true
-        #
-        # inhibit_rules:
-        #   - target_matchers:
-        #       - severity=~"warning|info"
-        #     source_matchers:
-        #       - severity=critical
-        #     equal:
-        #       - cluster
-        #       - namespace
-        #       - alertname
-        #   - target_matchers:
-        #       - severity=info
-        #     source_matchers:
-        #       - severity=warning
-        #     equal:
-        #       - cluster
-        #       - namespace
-        #       - alertname
-        #   - target_matchers:
-        #       - severity=info
-        #     source_matchers:
-        #       - alertname=InfoInhibitor
-        #     equal:
-        #       - cluster
-        #       - namespace
-
+          receiver: matrix-mercury
+          group_by: ["alertname", "namespace"]
+          group_wait: 45s
+          group_interval: 5m
+          # 12h, not the 4h default: a homelab alert still firing tomorrow does
+          # not need re-announcing every four hours.
+          repeat_interval: 12h
+          routes:
+            # Watchdog fires forever by design (it proves the pipeline is
+            # alive). Do not put it in a human room; it is asserted instead by
+            # the bridge's own /metrics.
+            - matchers: ['alertname="Watchdog"']
+              receiver: blackhole
+            - matchers: ['alertname="InfoInhibitor"']
+              receiver: blackhole
+            # info/none never reaches Mercury. Everything at warning and above
+            # falls through to the top-level matrix-mercury receiver.
+            - matchers: ['severity=~"info|none"']
+              receiver: blackhole
+            # Critical gets its own leaf only to shorten the wait -- same room,
+            # but announced fast and grouped tightly rather than batched with
+            # unrelated warnings.
+            - matchers: ['severity="critical"']
+              receiver: matrix-mercury
+              group_wait: 10s
+              group_interval: 2m
+              repeat_interval: 4h
+        inhibit_rules:
+          - source_matchers: ['severity="critical"']
+            target_matchers: ['severity=~"warning|info"']
+            equal: ["cluster", "namespace", "alertname"]
+          - source_matchers: ['severity="warning"']
+            target_matchers: ['severity="info"']
+            equal: ["cluster", "namespace", "alertname"]
+          # A node that is down explains every pod on it.
+          - source_matchers: ['alertname="KubeNodeNotReady"']
+            target_matchers: ['severity=~"warning|critical"']
+            equal: ["node"]
         receivers:
           - name: blackhole
-        # - name: "slack-monitoring"
-        #   slack_configs:
-        #     - channel: "#channel"
-        #       send_resolved: true
-        #       title: '{{ template "slack.monzo.title" . }}'
-        #       icon_emoji: '{{ template "slack.monzo.icon_emoji" . }}'
-        #       color: '{{ template "slack.monzo.color" . }}'
-        #       text: '{{ template "slack.monzo.text" . }}'
-        #       actions:
-        #         - type: button
-        #           text: "Runbook :green_book:"
-        #           url: "{{ (index .Alerts 0).Annotations.runbook_url }}"
-        #         - type: button
-        #           text: "Query :mag:"
-        #           url: "{{ (index .Alerts 0).GeneratorURL }}"
-        #         - type: button
-        #           text: "Dashboard :grafana:"
-        #           url: "{{ (index .Alerts 0).Annotations.dashboard }}"
-        #         - type: button
-        #           text: "Silence :no_bell:"
-        #           url: '{{ template "__alert_silence_link" . }}'
-        #         - type: button
-        #           text: '{{ template "slack.monzo.link_button_text" . }}'
-        #           url: "{{ .CommonAnnotations.link_url }}"
-        # - name: slack-code-owners
-        #   slack_configs:
-        #     - channel: "#{{ .CommonLabels.code_owner_channel }}"
-        #       send_resolved: true
-        #       title: '{{ template "slack.monzo.title" . }}'
-        #       icon_emoji: '{{ template "slack.monzo.icon_emoji" . }}'
-        #       color: '{{ template "slack.monzo.color" . }}'
-        #       text: '{{ template "slack.monzo.text" . }}'
-        #       actions:
-        #         - type: button
-        #           text: "Runbook :green_book:"
-        #           url: "{{ (index .Alerts 0).Annotations.runbook }}"
-        #         - type: button
-        #           text: "Query :mag:"
-        #           url: "{{ (index .Alerts 0).GeneratorURL }}"
-        #         - type: button
-        #           text: "Dashboard :grafana:"
-        #           url: "{{ (index .Alerts 0).Annotations.dashboard }}"
-        #         - type: button
-        #           text: "Silence :no_bell:"
-        #           url: '{{ template "__alert_silence_link" . }}'
-        #         - type: button
-        #           text: '{{ template "slack.monzo.link_button_text" . }}'
-        #           url: "{{ .CommonAnnotations.link_url }}"
-        #
-      # -- Better alert templates for [slack source](https://gist.github.com/milesbxf/e2744fc90e9c41b47aa47925f8ff6512)
-      monzoTemplate:
-        enabled: true
+          - name: matrix-mercury
+            webhook_configs:
+              - url: http://matrix-alertmanager-receiver.observability.svc.cluster.local:9088/alerts/mercury
+                send_resolved: true
+                http_config:
+                  basic_auth:
+                    username: alertmanager
+                    # The password lives in a Secret mounted by
+                    # .spec.secrets below; VMAlertmanager mounts each named
+                    # Secret at /etc/alertmanager/secrets/<name>/<key>.
+                    password_file: /etc/alertmanager/secrets/matrix-webhook/password
 
       # -- (object) Extra alert templates
       templateFiles:
