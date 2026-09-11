@@ -157,22 +157,31 @@ at Task 1.6, not at the end.
 # Phase 0: Prerequisites (hard gate — NUT is useless without these)
 
 > **Status 2026-09-11: Tasks 0.2 and 0.3 are DONE.** Graceful node shutdown is
-> applied and verified on all four nodes; worker-01 rebooted undrained, with no
-> intervention, in a 20.1s dark gap and zero libceph errors. Details in
-> `docs/runbooks/node-reboot.md` under "Verification results".
+> applied and verified on all four nodes. Three undrained reboots (worker-01,
+> worker-00, control-00) completed with no intervention and zero libceph errors;
+> healthy nodes return in ~20s. Full writeup:
+> `docs/postmortems/2026-08-28-node-shutdown-hang.md`.
 >
-> **Two findings change Phase 3's numbers:**
+> **Three findings change Phase 3's numbers:**
 >
 > 1. **`unattended-upgrades`, not kubelet, consumes the 180s inhibitor window.**
 >    Kubelet finishes in seconds; logind then waits out unattended-upgrades and
 >    force-times-it-out at 180s. Budget ~3 min per node for this, or stop the
 >    service before an orchestrated shutdown.
-> 2. **worker-05 has an unresolved hardware thermal fault** (92 C package, 95 C
+> 2. **control-00 additionally burns ~2 min per boot** in
+>    `systemd-networkd-wait-online`, blocking on the unplugged `enp1s0f0`. That
+>    is recovery time on battery, on the node that must come back last. One-line
+>    netplan fix, not yet applied.
+> 3. **worker-05 has an unresolved hardware thermal fault** (92 C package, 95 C
 >    PCH, ~20,717 throttle events/hr while idle) and **cannot currently reboot
 >    unattended**; it needed a physical power button press on both tests. The
 >    wave-1 design assumes worker-05 powers off on command. **That assumption
 >    does not hold today.** Do not arm the orchestrator until this is fixed, or
 >    the first real outage will stall on wave 1.
+>
+> Also correct the backup assumption in this plan if it appears: this cluster
+> uses the embedded **SQLite/kine** datastore, not etcd. `k3s etcd-snapshot save`
+> fails with `etcd datastore disabled`.
 
 The 2026-08-28 incident proves the nodes currently **do not shut down cleanly on
 their own**. Automating a shutdown that hangs just means the battery dies

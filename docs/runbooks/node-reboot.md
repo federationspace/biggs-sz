@@ -3,15 +3,17 @@
 Written after the 2026-08-28 reboot, where `control-00` and `worker-05` both
 hung in late shutdown and had to be recovered the hard way.
 
-> **Status as of 2026-09-11: Fix 2 is APPLIED on all four nodes and verified by
-> live reboot test.** `InhibitDelayMaxSec=180` and kubelet's shutdown inhibitor
-> lock are confirmed present cluster-wide. Fixes 1 and 4 are procedure. Fix 3
-> (control-00 loopback NFS) is untouched and unproven; it only gets exercised
-> when control-00 itself reboots.
+> **Status as of 2026-09-11: Fixes 2 and 3 are APPLIED and VERIFIED on all four
+> nodes.** Undrained reboots of worker-01, worker-00 and control-00 all completed
+> with no human intervention and zero libceph errors. Fix 1 is procedure; Fix 4
+> is informational.
 >
-> Two undrained reboot tests on 2026-09-11 confirmed the original failure is
-> gone. See "Verification results" below, including a **hardware fault on
-> worker-05** found during testing.
+> Two open items, both out of scope for this work:
+> - **worker-05 has a hardware thermal fault** and cannot reboot unattended.
+> - **control-00 wastes 2 min per boot** on an unplugged NIC (netplan one-liner).
+>
+> Full narrative and the permanent host changes are in
+> `docs/postmortems/2026-08-28-node-shutdown-hang.md`.
 
 ## Why nodes hang on reboot
 
@@ -193,19 +195,32 @@ that Flux will not restore for you.
 
 ## Fix 3: control-00's loopback NFS
 
+**RESOLVED 2026-09-11 by Fix 2.** control-00's undrained reboot showed kubelet
+releasing all 12 loopback NFS and 22 RBD mounts before nfsd stopped, with zero
+libceph errors and no D-state processes afterwards. See "control-00, the hard
+case" under Verification results. The remaining text explains *why* it was
+believed risky and why option 1 turned out to be sufficient.
+
 control-00 is both the NFS server and an NFS client of itself. `192.168.2.32`
 is its own NIC (`enp2s0f0`); its cluster identity is `192.168.2.164`.
 
 Current state:
 
 - 11 RBD devices
-- 8 `hard` NFS mounts from `192.168.2.32:/`, its own address
+- 12 `hard` NFS mounts from `192.168.2.32:/`, its own address
 - `nfs-server` active locally
 - hosts mon-a and the `tank` ZFS pool
 
-When nfsd is torn down during shutdown, `hard` mounts retry forever against a
-server that no longer exists. This is the classic loopback-NFS shutdown
-deadlock, stacked on top of the Ceph problem worker-05 had.
+In the general case, when nfsd is torn down during shutdown, `hard` mounts retry
+forever against a server that no longer exists: the classic loopback-NFS
+deadlock. Two things prevent that here, both verified on the node:
+
+1. **Every one of those mounts is kubelet-managed** (under `/var/lib/kubelet/`),
+   so kubelet's 180s inhibitor covers all of them. None are system-level `fstab`
+   mounts, which is what would have been genuinely dangerous.
+2. **`nfs-server` has `DefaultDependencies=no` and no `Conflicts=shutdown.target`**,
+   so systemd does not stop it early; it keeps serving until late in shutdown,
+   after kubelet has already unmounted.
 
 Seven media pods on control-00 mount `media-pvc` this way: `epub-only`,
 `lidarr`, `radarr`, `readarr`, `romm`, `sabnzbd`, `sonarr`. The PV is
@@ -216,19 +231,17 @@ corruption on a media library. Keep `hard`.
 
 Options, in order of preference:
 
-1. **Fix 2 largely resolves this.** With graceful shutdown, pods terminate and
-   volumes unmount while nfsd is still running. Do this first and re-test.
+1. **Fix 2 resolves this.** Confirmed by the 2026-09-11 reboot: pods terminate
+   and volumes unmount while nfsd is still running.
 2. **Give control-00-local pods a local volume instead.** Since control-00 *is*
    the NAS and `/tank` is local to it, routing its own pods over loopback NFS
-   buys nothing but latency and this deadlock. A `local` PV pinned to control-00
-   would remove the loopback entirely. The tradeoff is real: `media-pvc` is RWX
-   and shared across nodes, so this means splitting the volume story between
+   buys nothing but latency. Still worth doing on latency grounds alone, but it
+   is no longer a correctness issue. The tradeoff is real: `media-pvc` is RWX and
+   shared across nodes, so this means splitting the volume story between
    control-00 and the workers, not a one-line change.
 3. **Pin the media pods to workers.** Simplest, but it defeats the deliberate
    design of staging downloads locally on the NAS and moving them to the ZFS
    pool without crossing the 1GbE link.
-
-I would do 1, verify with a test reboot, and only take on 2 if it still hangs.
 
 ## Fix 4: Ceph is unhealthy right now
 
@@ -300,6 +313,104 @@ human intervention:
 **The 20.1s dark gap is the headline number.** The "~7 minute POST" in the table
 above was never POST; it was the machine sitting in a stalled shutdown. A
 healthy node on this hardware is back in about 20 seconds.
+
+### worker-00, confirming second data point
+
+40 pods, roughly double worker-01, including `mon-f`, `osd.0`, `rook-ceph-tools`
+and **5 CNPG PostgreSQL primaries**. Also undrained, also unattended:
+
+| Measure | worker-01 | worker-00 |
+|---|---|---|
+| Pods (no drain) | 21 | 40 |
+| kubelet reacted | +25ms | +0ms |
+| Time to go dark | 183.6s | 183.6s |
+| **Dark gap** | **20.1s** | **20.1s** |
+| libceph errors during shutdown | 0 | 0 |
+
+Byte-identical timings under nearly double the load. All seven CNPG clusters
+returned `Cluster in healthy state` with new primaries elected; Ceph was back to
+`33 active+clean` within ~60s.
+
+### control-00, the hard case
+
+Single control plane, `mon-a`, the NFS server, the ZFS pool, 78 pods, 12 loopback
+NFS mounts and 22 RBD mounts. Rebooted undrained with **no intervention**:
+
+| Measure | Result |
+|---|---|
+| Volume `TearDown succeeded` | **436** |
+| `NodeShutdown` admission denials | 191 |
+| libceph errors during power-down | **0** |
+| D-state processes after boot | **none** |
+| Dark gap | 169s (see boot-time finding below) |
+| Kernel | 6.8.0-138 -> 6.8.0-139 |
+
+**This proves Fix 3.** The loopback NFS teardown ordered correctly, with no
+deadlock:
+
+```
+22:52:50  Stopped rpc-statd / nfs-mountd / fsidd
+22:52:50  Stopped target nfs-client.target
+22:52:53  Unmounted tank-media.mount
+22:52:53  Unmounted tank.mount
+22:52:54  Reached target reboot.target
+```
+
+kubelet released every loopback NFS and RBD mount *before* nfsd went away. The
+mechanism that made this safe is that **all 34 mounts are kubelet-managed**;
+none are system-level, so the 180s inhibitor covers all of them. Two ordering
+facts also help: `nfs-server` has `DefaultDependencies=no` and no
+`Conflicts=shutdown.target`, so systemd does not stop it early.
+
+### control-00 wastes 2 minutes on an unplugged NIC
+
+Not a graceful-shutdown problem, but it dominates control-00's boot:
+
+```
+Startup finished in 14.995s (kernel) + 2min 39.070s (userspace)
+2min 139ms  systemd-networkd-wait-online.service   <- 76% of boot
+   20.686s  k3s.service
+```
+
+`/etc/netplan/00-installer-config.yaml` sets `dhcp4: true` on all four NICs, so
+netplan generates a wait-online override listing every one of them. `enp1s0f0`
+has no cable (`Link detected: no`, `no-carrier`), so networkd blocks for the full
+120s timeout and the unit ends in `failed`. The three NICs that matter
+(`enp1s0f1` 192.168.2.164, `enp2s0f0` 192.168.2.32 for NFS, `enp2s0f1`
+192.168.11.166) all come up `routable`.
+
+This is cosmetic for uptime but real for the UPS budget: 2 minutes of dead wait
+on battery, on the node that must come back last. Fix is one line in netplan,
+either dropping the unused interface or marking it optional:
+
+```yaml
+    enp1s0f0:
+        dhcp4: true
+        optional: true
+```
+
+Then `sudo netplan generate && sudo systemctl daemon-reload`. **Not yet applied**;
+changing control-plane networking deserves its own maintenance window.
+
+### Expect a pile of NodeShutdown pod records afterwards
+
+After every graceful shutdown the API server is left with `Failed` pods whose
+reason is `NodeShutdown`; 90 after worker-00, 172 after control-00, nearly all
+`cilium-operator`. These are **bookkeeping tombstones, not failures**. During the
+180s window the ReplicaSet keeps trying to place a pod on the departing node and
+kubelet correctly rejects each attempt, leaving a record per try.
+
+Verify the workload is actually fine, then clear them:
+
+```sh
+kubectl -n kube-system get ds cilium            # expect 4/4
+kubectl -n kube-system get deploy cilium-operator  # expect 2/2
+kubectl get pods -A --field-selector status.phase=Failed -o custom-columns=R:.status.reason --no-headers | sort | uniq -c
+kubectl delete pods -A --field-selector status.phase=Failed
+```
+
+The count scales with the length of the inhibitor window, so shortening the
+unattended-upgrades delay reduces it too.
 
 ### The 180s is unattended-upgrades, not kubelet
 
