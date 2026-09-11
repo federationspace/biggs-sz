@@ -27,13 +27,20 @@ data:
       metrics-path: /metrics
       metrics-enabled: true
       basic-username: alertmanager
-      basic-password: ${WEBHOOK_BASIC_PASSWORD}
+      # QUOTE every env placeholder below: expansion is a raw byte replace that
+      # happens BEFORE the YAML is parsed (internal/config/parser.go
+      # replaceEnvVariables), so the expanded value must already sit inside
+      # quotes to be a valid scalar. Unquoted, user-id expands to
+      # "@alertbot:..." and '@' is a YAML reserved character -> "found
+      # character that cannot start any token", the whole config fails to
+      # parse, and every field silently reads as empty.
+      basic-password: "${WEBHOOK_BASIC_PASSWORD}"
     matrix:
       # In-cluster client-server API of continuwuity; bypasses the Cloudflare
       # tunnel entirely, same as ai-system/hermes does.
       homeserver-url: http://continuwuity-service.matrix.svc.cluster.local:8080
-      user-id: ${MATRIX_USER_ID}
-      access-token: ${MATRIX_ACCESS_TOKEN}
+      user-id: "${MATRIX_USER_ID}"
+      access-token: "${MATRIX_ACCESS_TOKEN}"
       # Pretty name -> room ID, so the Alertmanager config carries no room ID
       # (it POSTs to /alerts/mercury). "mercury" is the Mercury room in the
       # Hermitage space. A room ID is not a credential, so it is declared in
