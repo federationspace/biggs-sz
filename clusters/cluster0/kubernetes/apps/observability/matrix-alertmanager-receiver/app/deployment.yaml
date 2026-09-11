@@ -33,7 +33,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: receiver
-          image: docker.io/metio/matrix-alertmanager-receiver:2026.8.26@sha256:f6235a5de611d099e05313c195e7af6722bd22cbe7d2e596482ca2adc51f9da7
+          image: docker.io/metio/matrix-alertmanager-receiver:2026.9.9@sha256:753af61a04eb029c35e73be364548733358281cf9935e56506cc8ff0c765e486
           imagePullPolicy: IfNotPresent
           args:
             - --config-path
