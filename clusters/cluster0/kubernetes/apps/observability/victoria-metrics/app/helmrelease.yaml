@@ -657,8 +657,11 @@ spec:
                     username: alertmanager
                     # The password lives in a Secret mounted by
                     # .spec.secrets below; VMAlertmanager mounts each named
-                    # Secret at /etc/alertmanager/secrets/<name>/<key>.
-                    password_file: /etc/alertmanager/secrets/matrix-webhook/password
+                    # Secret at /etc/vm/secrets/<name>/<key> (NOT
+                    # /etc/alertmanager/secrets/ -- verified against the live
+                    # pod after the first deploy landed the mount at the wrong
+                    # path and the dispatcher logged "unable to read file").
+                    password_file: /etc/vm/secrets/matrix-webhook/password
 
       # -- (object) Extra alert templates
       templateFiles:
