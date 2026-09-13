@@ -171,8 +171,59 @@ ai-system stack) and `netbird-client` (403 from `netbird.biggs.dog`). Both
 crash-loop identically on every other node, with 28-29h uptimes predating this
 work.
 
-**Still outstanding:** `noin`/`nobackfill` remain set and Ceph is still
-`HEALTH_ERR` at 2 OSDs. Phase 4 has not been started.
+**2026-09-13, Phase 4 (PR #154) — DONE and merged. Ceph data redundancy is
+fully restored.** osd.2 was created on worker-02 at
+`/dev/mapper/ubuntu--vg-lvceph`, the CRUSH tree is back to three hosts, and
+`noin`/`nobackfill` were cleared by hand after confirming the OSD came up `in`.
+Backfill of 156 GiB ran at 50-81 MiB/s and finished in roughly 45 minutes,
+landing inside this plan's 30-90 minute estimate.
+
+```
+33 pgs: 33 active+clean          # was 33 active+undersized+degraded
+osd: 3 osds: 3 up, 3 in
+RAW: 2.3 TiB, 421 GiB used (18.13%), MAX AVAIL 596 GiB
+```
+
+`ceph crash archive-all` cleared the `RECENT_MGR_MODULE_CRASH` warning; all 11
+crashes were dated 2026-09-11 and predate this work.
+
+**Ceph still reports `HEALTH_ERR`, but for reasons unrelated to the node swap
+and unchanged by it:**
+
+- `[ERR] AUTH_INSECURE_SERVICE_KEY_TYPE` plus three matching `AUTH_INSECURE_*`
+  warnings. This is the Squid-era insecure-key-type deprecation, present before
+  worker-05 failed. **It is the sole reason the cluster is not `HEALTH_OK`** and
+  deserves its own piece of work; rotating auth keys is not a node-replacement
+  task.
+- `[WRN] MON_DISK_LOW: mon a has 21% avail`. mon.a is on control-00, whose root
+  filesystem is 79% used (99.6 GB used, 27 GB free). Ceph warns below 30%. New
+  since the worker-01 disk work drew attention to it, not caused by it. Worth
+  watching, since a mon that runs out of space takes quorum with it.
+
+**The plan's Phase 5 concern did not materialise:** CNPG had already
+re-provisioned every cluster to 3/3 during Phase 1, so no database work was
+needed once the third host returned.
+
+**2026-09-13, Phase 6 — verification DONE. The drain/reboot cycle passed.**
+worker-02 was drained (3 rook pods evicted, no hangs), rebooted, and uncordoned.
+`journalctl -b -1 -k | grep -i libceph` returned nothing, which is the signal
+that the OSD unmapped cleanly rather than the kernel tearing down RBD mounts
+under a live client. osd.2 came back `Running` on its own and the cluster
+returned to `33 active+clean`.
+
+Both host fixes survived the reboot, which is the point of testing rather than
+assuming: `/configz` still reports `shutdownGracePeriod: 3m0s` /
+`shutdownGracePeriodCriticalPods: 1m0s`, `InhibitDelayMaxUSec` is still
+`t 180000000`, and kubelet re-registered its shutdown inhibitor. Temperature
+after a full reboot cycle: **27.8 C**, unchanged from idle.
+
+Node came back `Ready` in about 3 minutes, with osd.2 taking a further ~1 minute
+to finish its 4 init containers. Nothing needed manual intervention.
+
+**Git is clean of operational worker-05 references.** Seven mentions remain and
+all seven are deliberate comments explaining why a setting exists: the osd
+liveness headroom, the `bdev_async_discard_threads` history, the worker-02 OSD
+caveat, and the note recording why gitea is no longer pinned.
 
 ---
 
