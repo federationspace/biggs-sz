@@ -33,6 +33,7 @@ K3S_VERSION=v1.34.3+k3s1    # must match the rest of the fleet
 | Storage | Rook Ceph (`ceph-block`), k3s `local-path`, NFS from control-00 |
 | Ceph topology | `failureDomain: host`, `replicated size 3`, one OSD per worker |
 | Node addressing | DHCP reservation on the router, keyed by NIC MAC |
+| LAN DNS | `lan-dns` VIP `192.168.2.8` (handed out by DHCP); `gregbob.net` is served by k8s-gateway |
 | SSH | port 22 on the LAN, port 20252 from outside |
 
 Because `failureDomain` is `host` and pool size is 3, **the cluster needs three
