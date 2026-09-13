@@ -1,0 +1,56 @@
+---
+# CoreDNS config for the LAN resolver. Two responsibilities:
+#  1. gregbob.net -> forward to k8s-gateway, which is authoritative for the zone
+#     and answers with the cluster's LAN VIPs (192.168.2.9 for HTTPRoute hosts
+#     on the agentgateway Gateway, and any annotated LoadBalancer Service).
+#  2. Everything else -> NextDNS over DoT (encrypted upstream), so no plaintext
+#     DNS leaves the network. The NextDNS profile (beae95) is selected via the
+#     TLS SNI; 45.90.28.159 / 45.90.30.159 are that profile's linked IPs.
+# CoreDNS runs non-root and binds 1053; the Service maps 53 -> 1053.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lan-dns
+  namespace: network
+data:
+  Corefile: |
+    gregbob.net:1053 {
+        errors
+        cache 30
+        # Forward to k8s-gateway's ClusterIP (NOT its 192.168.2.7 LB VIP): a pod
+        # reaching a LoadBalancer VIP whose backend is on the SAME node hits a
+        # Cilium hairpin failure, so a lan-dns replica co-located with the
+        # k8s-gateway pod would get empty answers. The ClusterIP path works
+        # regardless of co-location.
+        #
+        # NOTE: this is the live, already-assigned ClusterIP of
+        # kube-system/k8s-gateway. ClusterIP is immutable, so it is stable for
+        # the life of that Service; if the Service is ever deleted and
+        # recreated, this value must be updated in the same change.
+        #
+        # max_fails 0: the ClusterIP is the ONLY upstream, so the default
+        # max_fails 2 ejection would turn a momentary blip (a couple of dropped
+        # UDP health probes) into a LAN-wide SERVFAIL storm plus a `. IN NS`
+        # re-probe flood. Never ejecting keeps us forwarding through transient
+        # hiccups; k8s-gateway runs 2 backends behind this ClusterIP, so Cilium
+        # load-balances away from a bad pod.
+        forward . 10.43.126.229 {
+            max_fails 0
+        }
+        reload
+    }
+    .:1053 {
+        errors
+        health {
+            lameduck 5s
+        }
+        ready
+        prometheus :9153
+        cache 300
+        forward . tls://45.90.28.159 tls://45.90.30.159 {
+            tls_servername beae95.dns.nextdns.io
+            health_check 5s
+        }
+        loadbalance
+        reload
+    }

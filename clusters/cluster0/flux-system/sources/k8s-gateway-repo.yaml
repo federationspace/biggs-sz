@@ -5,4 +5,15 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1h
-  url: https://k8s-gateway.github.io/k8s_gateway/
+  # The project's old GitHub Pages index (k8s-gateway.github.io/k8s_gateway/)
+  # now 404s, which left this HelmRepository FetchFailed and every k8s-gateway
+  # HelmRelease reconcile stuck at SourceNotReady. The project publishes the
+  # chart index from its Codeberg mirror instead.
+  #
+  # NOTE: the `urls:` entries inside that index are absolute links to
+  # k8s-gateway.kryptonian.kapsi.fi, so Flux reads the index from Codeberg but
+  # downloads the chart tarball from that host. No index currently serves the
+  # tarball from its own origin. k8s-gateway-3.4.1.tgz is byte-identical across
+  # both (sha256
+  # d25426d114b3d687d56bd54de243c52c6a0b28b11a33c7948187be394919c7d1).
+  url: https://k8s-gateway.codeberg.page/k8s_gateway/

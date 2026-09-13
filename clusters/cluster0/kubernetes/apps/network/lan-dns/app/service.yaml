@@ -1,0 +1,29 @@
+---
+# LAN resolver VIP. Point the router's per-VLAN DHCP "DNS Server" at this
+# address. 192.168.2.8 is a free address inside the Cilium LB IPAM pool
+# (192.168.2.6-192.168.2.254); .6 = irc, .7 = k8s-gateway, .9 = the
+# wildcard-gregbob-net Gateway. There is NO MetalLB in this cluster, so the VIP
+# is pinned with the Cilium annotation rather than spec.loadBalancerIP.
+# externalTrafficPolicy Cluster so any node can answer (the VIP is advertised
+# for HA).
+apiVersion: v1
+kind: Service
+metadata:
+  name: lan-dns
+  namespace: network
+  annotations:
+    io.cilium/lb-ipam-ips: "192.168.2.8"
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Cluster
+  selector:
+    app.kubernetes.io/name: lan-dns
+  ports:
+    - name: dns-udp
+      port: 53
+      targetPort: 1053
+      protocol: UDP
+    - name: dns-tcp
+      port: 53
+      targetPort: 1053
+      protocol: TCP
