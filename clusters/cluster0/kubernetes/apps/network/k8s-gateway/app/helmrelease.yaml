@@ -26,11 +26,84 @@ spec:
   values:
     # nodeSelector:
       # kubernetes.io/hostname: control-00
-    watchedResources: ["HTTPRoute"]
+    # Run two replicas so the gregbob.net zone authority is not a single point
+    # of failure. lan-dns forwards the whole zone to this Service's ClusterIP;
+    # with one backend, a brief pod blip drops UDP probes, trips CoreDNS
+    # forward's max_fails ejection, and produces LAN-wide SERVFAIL storms until
+    # recovery. Two backends behind the ClusterIP survive a single-pod hiccup.
+    replicaCount: 2
+    # Spread the replicas across nodes so losing one node can't take the zone
+    # down.
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: k8s-gateway
+    # CoreDNS listens on container port 1053 (the Service maps 53 -> 1053), so
+    # it can run fully non-root with no added capabilities (NET_BIND_SERVICE is
+    # not required). The chart already forces runAsUser 1000 while secure: true.
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      capabilities:
+        drop:
+          - ALL
+      seccompProfile:
+        type: RuntimeDefault
+    # Service added so k8s-gateway also serves DNS for annotated LoadBalancer
+    # services (not just HTTPRoute hosts).
+    watchedResources: ["HTTPRoute", "Service"]
     domain: gregbob.net
-    # fallthrough:
-      # enabled: true
-      # zones: [gregbob.net]
+    # Fall through unknown gregbob.net names to public resolvers. Required now
+    # that lan-dns sends the ENTIRE zone here: without it, any gregbob.net name
+    # this cluster does not own (public-only records, Cloudflare-proxied hosts)
+    # would NXDOMAIN for every LAN client. Cluster-owned names keep resolving
+    # via k8s_gateway to LAN IPs because k8s_gateway runs first.
+    #
+    # LOOP HAZARD: the chart's DEFAULT extraZonePlugins forward is
+    # `forward . /etc/resolv.conf`, i.e. in-cluster kube-dns. If kube-dns ever
+    # gains a gregbob.net zone pointing back at this Service, that default turns
+    # fallthrough into a loop -> SERVFAIL. The list below is the chart default
+    # REPLICATED IN FULL with ONLY the forward parameters changed, from
+    # `/etc/resolv.conf` to the homelab's NextDNS resolvers. The
+    # ready/health/prometheus plugins MUST stay: they back the liveness and
+    # readiness probes, and dropping them leaves the pods NotReady and the LB
+    # with no endpoints.
+    fallthrough:
+      enabled: true
+      zones: [gregbob.net]
+    extraZonePlugins:
+      - name: log
+      - name: errors
+      # Serves a /health endpoint on :8080, required for livenessProbe
+      - name: health
+        configBlock: |-
+          lameduck 5s
+      # Serves a /ready endpoint on :8181, required for readinessProbe
+      - name: ready
+      # Serves a /metrics endpoint on :9153, required for serviceMonitor
+      - name: prometheus
+        parameters: 0.0.0.0:9153
+      # NextDNS resolvers ONLY -- NOT /etc/resolv.conf (-> kube-dns -> loop
+      # risk). These are the linked IPs of the homelab's NextDNS profile
+      # (beae95), the same profile lan-dns forwards its catch-all zone to.
+      - name: forward
+        parameters: . 45.90.28.159 45.90.30.159
+      - name: loop
+      - name: reload
+      - name: loadbalance
     dnsChallenge:
       enabled: true
       domain: dns01.clouddns.com
@@ -45,4 +118,3 @@ spec:
       create: true
       name: ""
       annotations: {}
-
