@@ -38,10 +38,14 @@ worth much anyway, so that's stickiness I can live with.
 ## Cluster layout
 
 - Single k3s control plane node: `control-00` (the NAS, see above).
-- Worker nodes: `worker-00`, `worker-01`.
+- Worker nodes: `worker-00`, `worker-01`, `worker-02`.
 - Note: `CiliumLoadBalancerIPPool` + BGP handles `LoadBalancer` IPs,
   **not** MetalLB (a MetalLB Helm repository source still exists in
-  `flux-system/sources` but is currently unused/legacy).
+  `flux-system/sources`, and a `metallb-system` namespace still exists in the
+  cluster, but both are unused legacy). Pin a VIP with the
+  `io.cilium/lb-ipam-ips` annotation rather than `spec.loadBalancerIP`.
+- Assigned VIPs from the pool (`192.168.2.6-192.168.2.254`): `.6` IRC, `.7`
+  k8s-gateway, `.8` lan-dns, `.9` the `wildcard-gregbob-net` Gateway.
 
 See **Core components** below for storage, networking, secrets, and
 certificate details.
@@ -53,8 +57,8 @@ clusters/cluster0/
 ├── flux-system/                # FluxInstance + Helm/OCI/Git repository sources
 └── kubernetes/apps/
     ├── ai-system/               # agent-sandbox, codebase-memory-mcp, csi-driver, embeddings,
-    │                            # exa-mcp, flux-mcp, kagent(-crds), mindwtr-mcp, substrate(-crds),
-    │                            # victoria-metrics-mcp, vllm
+    │                            # exa-mcp, flux-mcp, hermes, kagent(-crds), mindwtr-mcp,
+    │                            # substrate(-crds), victoria-metrics-mcp, vllm
     ├── cert-manager/            # cert-manager (ACME/DNS-01 issuers)
     ├── databases/                # cnpg (CloudNativePG)
     ├── external-secrets/         # external-secrets, onepassword-connect
@@ -65,10 +69,10 @@ clusters/cluster0/
     ├── matrix/                    # continuwuity, sable
     ├── media/                     # jellyfin, plex, sonarr, radarr, lidarr, readarr, prowlarr,
     │                             # sabnzbd, ombi, homarr, romm, rreading-glasses, epub-only,
-    │                             # media-storage
-    ├── netbird-client/            # client, NetBird mesh VPN agent
-    ├── network/                   # agentgateway, k8s-gateway, cloudflared
-    ├── observability/             # victoria-metrics, victoria-logs, grafana-operator
+    │                             # pinepods, media-storage
+    ├── network/                   # agentgateway, k8s-gateway, lan-dns
+    ├── observability/             # victoria-metrics, victoria-logs, grafana-operator,
+    │                             # matrix-alertmanager-receiver
     ├── renovate/                  # renovate, self-hosted; keeps chart/image pins current
     └── rook-ceph/                 # rook-ceph, Ceph operator + cluster, backs `ceph-block` SC
 ```
@@ -80,9 +84,17 @@ clusters/cluster0/
 | Component | Description |
 |---|---|
 | [Cilium](https://cilium.io/) | CNI; `CiliumLoadBalancerIPPool` + BGP advertisement (`kube-system/cilium/bgp/`) hand out `LoadBalancer` IPs from `192.168.2.0/24` |
-| [k8s-gateway](https://github.com/ori-edge/k8s_gateway) | Gateway API implementation; HTTPRoutes attach to the shared Gateway `wildcard-gregbob-net` in `network` by name |
-| [cloudflared](https://github.com/cloudflare/cloudflared) | Cloudflare Tunnel; terminates proxied `*.gregbob.net` (+ apex) traffic and forwards HTTP-only to `wildcard-gregbob-net.network.svc:80`; no other internet-facing ingress besides SSH |
-| agentgateway | Gateway for AI/agent-facing traffic |
+| agentgateway | Gateway API implementation; HTTPRoutes attach to the shared Gateway `wildcard-gregbob-net` in `network` by name (no `sectionName`), reachable at VIP `192.168.2.9` |
+| [k8s-gateway](https://github.com/ori-edge/k8s_gateway) | DNS authority for the `gregbob.net` zone; watches HTTPRoutes and annotated Services and answers with their LAN VIPs. Two replicas with node anti-affinity, falling through unknown names to NextDNS |
+| lan-dns | CoreDNS LAN resolver at VIP `192.168.2.8`, the address the router hands out over DHCP. Forwards `gregbob.net` to k8s-gateway's ClusterIP and everything else to NextDNS over DoT |
+
+Public traffic reaches the cluster through a router port-forward of 80/443 to
+the gateway VIP `192.168.2.9`, with Cloudflare proxying in front of it
+(orange cloud, origin = the WAN IP). There is no Cloudflare Tunnel; the
+`cloudflared` DaemonSet was removed in September 2026. Remote access is a
+WireGuard VPN on the UDM rather than an in-cluster component; the former
+NetBird mesh client was removed at the same time, though an unused `wireguard`
+namespace and HelmRepository source survive as legacy.
 
 ### Identity & secrets
 
@@ -98,7 +110,7 @@ clusters/cluster0/
 |---|---|
 | `local-path` | k3s built-in, default StorageClass, node-local SSD |
 | [Rook-Ceph](https://rook.io/) | `ceph-block` StorageClass; replicated block storage independent of any one node |
-| NFS | external NFS share, `nfs` StorageClass, shared/media volumes |
+| NFS | external NFS share from the NAS, `nfs-storage` StorageClass (`provisioner: nfs`), shared/media volumes |
 | [volsync](https://volsync.readthedocs.io/) | volume backup/replication (`kube-system`) |
 
 ### System
@@ -164,10 +176,14 @@ Secrets follow a two-tier model:
 ## Hardcoded values to change if you fork this
 
 - `kubernetes.io/hostname: control-00` / `worker-00` / `worker-01`,
-  node pins for control-plane-hosted and iGPU-transcoding workloads.
+  node pins for control-plane-hosted, iGPU-transcoding, and Matrix workloads.
 - `CiliumLoadBalancerIPPool` blocks in `kube-system/cilium/bgp/bgp-config.yaml`,
-  the LoadBalancer IP range.
+  the LoadBalancer IP range, plus the `io.cilium/lb-ipam-ips` annotations that
+  pin individual VIPs (`lan-dns`, `irc`).
 - `provisioner: nfs` / NFS server IP, your NFS export.
+- The NextDNS resolver IPs and profile SNI in `network/lan-dns/app/configmap.yaml`
+  and `network/k8s-gateway/app/helmrelease.yaml`, plus the hardcoded
+  k8s-gateway ClusterIP that lan-dns forwards to.
 - `vaults:` in ExternalSecret/SecretStore resources, your 1Password vault name.
 - `wildcard-gregbob-net` Gateway name and `*.gregbob.net` / `biggs.dog` hosts
   in HTTPRoutes, your own domain(s).

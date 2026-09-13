@@ -65,7 +65,7 @@ kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph -s
 For each node, one at a time:
 
 ```sh
-NODE=worker-05
+NODE=worker-02
 
 kubectl drain "$NODE" --ignore-daemonsets --delete-emptydir-data --timeout=10m
 
@@ -437,7 +437,13 @@ Do not lower `InhibitDelayMaxSec` below `shutdownGracePeriod` to solve this; tha
 re-breaks kubelet. A per-service cap for unattended-upgrades is the correct fix
 if one is needed.
 
-### worker-05 has a hardware thermal fault
+### worker-05 has a hardware thermal fault (HISTORICAL, node retired)
+
+> **Retired 2026-09-13.** worker-05 is no longer in the cluster; `worker-02`
+> (GMKtec NucBox K17) took its place and its Ceph OSD. The section below is
+> kept as the diagnostic pattern, and applies again only if worker-05 ever
+> returns to service. The "quick check" commands at the end are still the way
+> to test any node.
 
 worker-05 could not complete either test unassisted and needed a physical power
 button press both times. The console showed:
@@ -524,16 +530,21 @@ sudo usermod -aG adm,systemd-journal szkud   # then log out and back in
 ## Access gotchas
 
 **SSH ports differ by path.** On the LAN, nodes listen on **22**; port 20252 is
-refused. From outside, only `69.61.172.135:20252` is forwarded, and it lands on
-control-00. Reach the workers by hopping through control-00.
+refused. From outside, `69.61.172.135:20252` is forwarded and lands on
+control-00. Reach the workers by hopping through control-00. Ports 80 and 443
+are also forwarded from the WAN, but to the gateway VIP `192.168.2.9`, not to
+a node.
 
-**control-00 cannot resolve `worker-05`.** `/etc/hosts` has entries for
-worker-00 and worker-01 only, so `ssh worker-05` fails with "Temporary failure in
-name resolution". Use `192.168.2.84` directly, or add the missing line:
+**control-00's `/etc/hosts` is incomplete.** It has entries for worker-00 and
+worker-01 only, so `ssh worker-02` fails with "Temporary failure in name
+resolution". Use `192.168.2.60` directly, or add the missing line:
 
 ```sh
-echo '192.168.2.84   worker-05' | sudo tee -a /etc/hosts
+echo '192.168.2.60   worker-02' | sudo tee -a /etc/hosts
 ```
 
 Any script that loops over nodes by hostname from control-00 will silently skip
-worker-05; use IPs in automation.
+worker-02; use IPs in automation.
+
+Current node addresses: control-00 `192.168.2.164`, worker-00 `192.168.2.204`,
+worker-01 `192.168.2.117`, worker-02 `192.168.2.60`.

@@ -8,6 +8,12 @@
 - **Status:** resolved and verified by three undrained test reboots. Two
   unrelated issues found along the way remain open.
 
+> **Update 2026-09-13.** Open item 1 (worker-05's thermal fault) was closed by
+> **retirement, not repair**: worker-05 left the cluster and `worker-02`
+> (GMKtec NucBox K17) took its place and its Ceph OSD. In open item 5, the
+> `netbird-client` CrashLoopBackOff is also moot; NetBird was removed from the
+> cluster entirely. The rest of this document stands as written.
+
 ---
 
 ## Summary
@@ -207,7 +213,7 @@ Recorded because each cost time and could mislead again.
 
 ## Open items
 
-### 1. worker-05 hardware thermal fault (blocking for UPS automation)
+### 1. worker-05 hardware thermal fault (CLOSED 2026-09-13 by retirement)
 
 Console on reboot: `warning: system has recovered from an over-temperature
 condition`. At idle:
@@ -223,8 +229,10 @@ condition`. At idle:
 while idle, running a Ceph OSD on a 28W laptop-class chip. Its shutdown sequence
 is clean; it simply cannot complete a power cycle unattended.
 
-Likely physical: dust-clogged heatsink, dried thermal paste, or airflow. **This
-blocks the NUT UPS plan**, whose wave 1 assumes worker-05 powers off on command.
+Likely physical: dust-clogged heatsink, dried thermal paste, or airflow. It
+blocked the NUT UPS plan, whose wave 1 assumed worker-05 powers off on command.
+**Closed by replacing the node with `worker-02` on 2026-09-13**, so the UPS work
+is unblocked; see `docs/runbooks/add-cluster-node.md`.
 
 ### 2. control-00 wastes 2 minutes per boot on an unplugged NIC
 
@@ -255,16 +263,17 @@ the inhibitor window, so fixing item 3 shrinks it.
 
 ### 5. Pre-existing, untouched
 
-`ai-system` pods Pending/CrashLoop (missing GPU infrastructure),
-`netbird-client` CrashLoopBackOff on the three workers, and Ceph `MON_DISK_LOW`
-(control-00 root 75% full; mon-a's data is only 74M, so this is really a
-filesystem-usage warning).
+`ai-system` pods Pending/CrashLoop (missing GPU infrastructure) and Ceph
+`MON_DISK_LOW` (control-00 root 75% full; mon-a's data is only 74M, so this is
+really a filesystem-usage warning). `netbird-client` also CrashLoopBackOff'd on
+the three workers at the time; NetBird has since been removed from the cluster.
 
 ---
 
 ## Follow-ups worth doing
 
-1. Fix worker-05's cooling, then re-test an unattended reboot. Gates the UPS work.
+1. ~~Fix worker-05's cooling, then re-test an unattended reboot.~~ Closed by
+   retiring the node in favour of worker-02 (2026-09-13).
 2. Apply the netplan `optional: true` one-liner during a maintenance window.
 3. Decide how to cap unattended-upgrades before arming NUT.
 4. **Re-check both drop-ins after every k3s upgrade.** k3s regenerates
