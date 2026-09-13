@@ -110,11 +110,69 @@ in place with `CLUSTER MEET` + `CLUSTER FORGET` + reassigning the 5,462 orphaned
 slots; `cluster_state:ok`, all 16384 slots covered. Only cache data was lost
 (gitea sessions/queues); repos are on `ceph-block` and Postgres was healthy 3/3.
 
-**Pre-existing failures, NOT caused by this work and still failing:** the
-`ai-system` stack (agent-sandbox, kagent, vllm, and the ~10 Kustomizations
-chained behind them via `dependsOn`). Those pods carry
-`nodeSelector: nvidia.com/gpu.present: "true"` and **no node in this cluster has
-an NVIDIA GPU**; their `lastTransitionTime` is 2026-08-20. Out of scope here.
+**2026-09-13, Phases 2-3 — worker-02 JOINED AND `Ready`.** The K17 is in the
+cluster at `192.168.2.60`, k3s `v1.34.3+k3s1`, kernel **7.0.0-31-generic**.
+Hardware confirmed as GMKtec NucBox K17, Core Ultra 5 226V, 8 threads, 16 GB,
+Intel I226-V NIC, Lunar Lake iGPU `[8086:64a0]`. Idles at **27.8 C** versus
+worker-05's 67 C, so the thermal fault was the chassis, not the workload.
+
+Deviations from what this plan assumed, all now settled:
+
+- **Only ONE NVMe is installed** — the carried 953.9 GB drive from worker-05,
+  serial `20121410240044`. The K17 shipped barebones, or its second slot is
+  unpopulated. This is **Contingency A**: the installer reproduced worker-05's
+  exact layout, 150 GB root + a 775 GB `ubuntu-vg/lvceph` LV on the same
+  spindle. Decision: **proceed with the shared-disk OSD now, add a dedicated
+  NVMe later.** Phase 4 therefore uses `/dev/mapper/ubuntu--vg-lvceph`, not a
+  whole-disk `by-id` path.
+- **The NIC links at 1000 Mb/s, not 2.5 GbE.** The controller is 2.5 GbE
+  capable, so the limit is the switch port or the cable. Worth chasing later;
+  it does not block anything, and every peer is 1 GbE anyway.
+- **The HWE kernel was mandatory, exactly as predicted, and for the predicted
+  reason.** Ubuntu 24.04.4 installed with GA 6.8.0-139, which bound `xe` but
+  exposed **only `card0`, no `renderD128`** — no render node means no hardware
+  transcoding. Installing `linux-generic-hwe-24.04` (7.0.0-31) created
+  `renderD128` on the next boot. Note the K17's I226-V NIC *did* work on GA, so
+  the feared "no network in the installer" scenario did not happen.
+
+**Host fixes applied and verified live** (section 6 of the runbook): the kubelet
+drop-in reads back through `/configz` as `shutdownGracePeriod: 3m0s` /
+`shutdownGracePeriodCriticalPods: 1m0s`, and the logind override gives
+`InhibitDelayMaxUSec = t 180000000`, with kubelet holding a visible `delay`
+inhibitor. The filename-collision trick worked: Ubuntu ships its own
+`unattended-upgrades-logind-maxdelay.conf` in `/usr/lib/systemd/logind.conf.d/`
+setting 30s, and reusing that exact name in `/etc/` overrides it.
+
+**DaemonSets self-scheduled** as expected: cilium, cilium-envoy, NFD worker,
+intel-gpu-plugin, rook-discover, rook RBD CSI nodeplugin, cloudflared, the
+victoria-logs/metrics collectors, and atelet.
+
+**NEW FINDING, blocks media workloads on this node: the GPU resource is named
+`gpu.intel.com/xe`, not `gpu.intel.com/i915`.** Lunar Lake is driven by the
+`xe` kernel driver; worker-00/01's Coffee Lake iGPUs use `i915`. intel-gpu-plugin
+v0.34.0 handles both, but names the advertised resource after the driver:
+
+| Node | Driver | Resource advertised |
+| --- | --- | --- |
+| worker-00 | `i915` | `gpu.intel.com/i915: 4` |
+| worker-01 | `i915` | `gpu.intel.com/i915: 4` |
+| **worker-02** | **`xe`** | **`gpu.intel.com/xe: 4`** |
+
+jellyfin and plex both request `gpu.intel.com/i915: "1"` and therefore **cannot
+schedule onto worker-02** as written. This is not a failure — the GPU works and
+is advertised — but it contradicts this plan's Phase 3 claim that "the NFD rule
+already matches `xe`" and that GPU capacity would be a free bonus. The node
+label `intel.feature.node.kubernetes.io/gpu=true` is identical across all three
+nodes, so *labels* are not the problem; the *resource name* is. See open items.
+
+**Pre-existing failures that also appear on worker-02, NOT caused by the join:**
+`runsc-cache` (cannot reach `rustfs.ai-system.svc:9000`, part of the dead
+ai-system stack) and `netbird-client` (403 from `netbird.biggs.dog`). Both
+crash-loop identically on every other node, with 28-29h uptimes predating this
+work.
+
+**Still outstanding:** `noin`/`nobackfill` remain set and Ceph is still
+`HEALTH_ERR` at 2 OSDs. Phase 4 has not been started.
 
 ---
 
@@ -781,6 +839,37 @@ are manual on every node, forever, until that changes.
 ---
 
 ## Risks and open questions
+
+**OPEN, needs a PR: jellyfin and plex cannot use worker-02's GPU.** They request
+`gpu.intel.com/i915`, but Lunar Lake's `xe` driver makes the plugin advertise
+`gpu.intel.com/xe`. Options, in order of preference:
+
+1. Make the deployments request the resource matching the node they target. A
+   single Deployment cannot request "either", so this means either pinning
+   media workloads to `i915` nodes (status quo, worker-02 gets no media), or
+   splitting per node class.
+2. Run a second intel-gpu-plugin DaemonSet on `xe` nodes with
+   `-resource-name gpu.intel.com/i915`, if the plugin version supports
+   overriding it, so the fleet presents one uniform resource name.
+3. Accept it: worker-02 does compute, worker-00/01 keep transcoding.
+
+Do **not** simply flip jellyfin to `gpu.intel.com/xe` — that would strand it on
+worker-02 alone and break its current placement on worker-01.
+
+**OPEN: worker-02's NIC negotiated 1 Gb/s on a 2.5 GbE controller.** Check the
+switch port and cable. Not blocking, since every peer is 1 GbE.
+
+**OPEN: worker-02 runs root and the Ceph OSD on one spindle** (Contingency A,
+accepted deliberately). This is the arrangement that made osd.2 the slow OSD at
+24ms apply latency. Fit a dedicated NVMe in the free M.2 slot when one is
+available, then migrate the OSD to a whole-disk `by-id` device and reclaim
+`lvceph`.
+
+**OPEN: a NOPASSWD sudoers file was added to worker-02** at
+`/etc/sudoers.d/90-szkud-nopasswd`, to let the automated install run unattended.
+The other nodes require a sudo password. Either remove it for consistency or
+adopt it fleet-wide as a deliberate choice; do not leave it as an undocumented
+one-off.
 
 **OPEN, needs its own PR: the Cilium `ipv4NativeRoutingCIDR` fix is only applied
 live, not in Git.** `clusters/cluster0/kubernetes/apps/kube-system/cilium/app/helmrelease.yaml`

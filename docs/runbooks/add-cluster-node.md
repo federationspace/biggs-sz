@@ -510,6 +510,8 @@ shutdown behaviour of.
 | Ceph stuck undersized after join | pool size 3, `failureDomain: host` | you need three OSD *hosts*; a second OSD on one host will not satisfy it |
 | Shutdown hangs in `systemd-shutdown` | section 6 skipped | apply 6a and 6b, verify with `busctl` |
 | `/dev/dri` missing | GA kernel too old for the iGPU | install `linux-generic-hwe-24.04` |
+| `card0` present but `renderD128` missing | same, partial support: the driver binds but exposes no render node, so there is no hardware transcoding | install the HWE kernel and reboot; verify with `ls /dev/dri` |
+| GPU workloads will not schedule on a new node although the plugin is `Running` and the node is labelled | **the advertised resource name follows the kernel driver.** Newer Intel iGPUs (Lunar Lake and later) use `xe` and advertise `gpu.intel.com/xe`; older ones use `i915` and advertise `gpu.intel.com/i915`. A pod requesting one will never schedule on a node offering the other. | check with the command below, then reconcile the resource name across the fleet before assuming the GPU is broken |
 | GPU workload unschedulable, node shows `i915: 0` | node hit `DiskPressure` and evicted the `intel-gpu-plugin` DaemonSet pod | free disk space, wait ~5 min for the condition to clear, then **delete the evicted pod by hand** (the DaemonSet will not replace it on its own) |
 | Node disk fills unexpectedly | a `local-path` PVC exceeded its request; **local-path does not enforce capacity** | find it with the kubelet stats API (below); cap the workload with an `emptyDir` `sizeLimit` or a cleanup schedule |
 | `sudo` over SSH hangs | node requires a sudo password, no TTY | use a privileged debug pod instead of SSH (below) |
@@ -547,3 +549,29 @@ kubectl -n kube-system delete pod disk-inspect
 
 `/var/lib/rancher/k3s/storage` is where `local-path` PVCs live, and is the first
 place to look.
+
+### Checking which GPU resource each node advertises
+
+Do this right after the join, before concluding a GPU workload is broken:
+
+```sh
+for n in $(kubectl get nodes -o name | cut -d/ -f2); do
+  echo "$n: $(kubectl get node $n -o jsonpath='{.status.allocatable}' \
+    | tr ',' '\n' | grep -i 'gpu.intel.com')"
+done
+```
+
+A mixed fleet is normal once you add a newer box, and it is a scheduling
+problem, not a hardware fault:
+
+```
+worker-00: "gpu.intel.com/i915":"4"     # Coffee Lake, i915 driver
+worker-02: "gpu.intel.com/xe":"4"       # Lunar Lake,  xe driver
+```
+
+Confirm the driver behind it with
+`basename $(readlink -f /sys/class/drm/card0/device/driver)` on the node. Decide
+deliberately whether to pin GPU workloads to one node class or to normalise the
+resource name across the fleet; do not leave the mismatch undocumented, because
+the symptom (`Pending`, "didn't match Pod's node affinity/selector") looks
+nothing like the cause.
