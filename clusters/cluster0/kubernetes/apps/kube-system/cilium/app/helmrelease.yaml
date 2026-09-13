@@ -87,7 +87,16 @@ spec:
       #     enabled: false
     ipam:
       mode: kubernetes
-    ipv4NativeRoutingCIDR: 10.244.0.0/16
+    # Must match the cluster's actual pod CIDR. k3s allocates from 10.42.0.0/16
+    # (nodes get 10.42.x.0/24), NOT the 10.244.0.0/16 that Flannel/kubeadm and
+    # most upstream Cilium docs assume. With routingMode: native and
+    # masquerading enabled, any pod traffic falling outside this CIDR is SNATed
+    # to the node IP, so it reaches its peer with cilium identity "remote-node"
+    # instead of the source pod's identity. Namespaces with NetworkPolicies
+    # then deny it: this silently broke flux-system (kustomize-controller could
+    # not reach source-controller across nodes) while leaving policy-free
+    # namespaces working, which made it look like an intermittent Flux fault.
+    ipv4NativeRoutingCIDR: 10.42.0.0/16
     k8sServiceHost: 192.168.2.32
     k8sServicePort: 6443
     kubeProxyReplacement: true
