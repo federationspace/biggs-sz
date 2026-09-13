@@ -14,7 +14,7 @@ Throughout, substitute:
 
 ```sh
 NODE=worker-02              # new node name (k3s uses the hostname)
-NODE_IP=192.168.2.84        # its address on the LAN
+NODE_IP=192.168.2.60        # its address on the LAN
 CONTROL_IP=192.168.2.32     # control-00's apiserver NIC (see /etc/hosts note)
 K3S_VERSION=v1.34.3+k3s1    # must match the rest of the fleet
 ```
@@ -487,7 +487,7 @@ shutdown behaviour of.
   the new node or `ssh worker-xx` will fail from there:
 
   ```sh
-  echo '192.168.2.84   worker-02' | sudo tee -a /etc/hosts
+  echo '192.168.2.60   worker-02' | sudo tee -a /etc/hosts
   ```
 
   Prefer IPs in automation regardless.
@@ -510,3 +510,40 @@ shutdown behaviour of.
 | Ceph stuck undersized after join | pool size 3, `failureDomain: host` | you need three OSD *hosts*; a second OSD on one host will not satisfy it |
 | Shutdown hangs in `systemd-shutdown` | section 6 skipped | apply 6a and 6b, verify with `busctl` |
 | `/dev/dri` missing | GA kernel too old for the iGPU | install `linux-generic-hwe-24.04` |
+| GPU workload unschedulable, node shows `i915: 0` | node hit `DiskPressure` and evicted the `intel-gpu-plugin` DaemonSet pod | free disk space, wait ~5 min for the condition to clear, then **delete the evicted pod by hand** (the DaemonSet will not replace it on its own) |
+| Node disk fills unexpectedly | a `local-path` PVC exceeded its request; **local-path does not enforce capacity** | find it with the kubelet stats API (below); cap the workload with an `emptyDir` `sizeLimit` or a cleanup schedule |
+| `sudo` over SSH hangs | node requires a sudo password, no TTY | use a privileged debug pod instead of SSH (below) |
+
+### Finding what filled a node's disk
+
+`du -x /` on a full node takes minutes and often times out; `sudo` over SSH may
+prompt for a password. The kubelet stats API needs neither:
+
+```sh
+kubectl get --raw "/api/v1/nodes/<node>/proxy/stats/summary" | \
+  jq '.pods[] | {p:"\(.podRef.namespace)/\(.podRef.name)",
+                 eph:.["ephemeral-storage"].usedBytes,
+                 vol:([.volume[]?.usedBytes]|add)}'
+```
+
+Beware: that only reports space kubelet attributes to pods. A `local-path`
+PVC's contents may not show up there, and node usage can far exceed the sum of
+the pods. When the numbers do not add up, inspect the host directly with a
+privileged pod (`system-node-critical`, so `DiskPressure` admission does not
+reject it):
+
+```sh
+kubectl run disk-inspect -n kube-system --image=busybox:1.36 --restart=Never \
+  --overrides='{"spec":{"nodeName":"<node>","priorityClassName":"system-node-critical",
+    "tolerations":[{"operator":"Exists"}],
+    "containers":[{"name":"shell","image":"busybox:1.36","command":["sleep","600"],
+      "securityContext":{"privileged":true},
+      "volumeMounts":[{"name":"host","mountPath":"/host"}]}],
+    "volumes":[{"name":"host","hostPath":{"path":"/"}}]}}' -- sleep 600
+
+kubectl -n kube-system exec disk-inspect -- du -xh -d1 /host/var/lib/rancher/k3s/storage | sort -rh | head
+kubectl -n kube-system delete pod disk-inspect
+```
+
+`/var/lib/rancher/k3s/storage` is where `local-path` PVCs live, and is the first
+place to look.
