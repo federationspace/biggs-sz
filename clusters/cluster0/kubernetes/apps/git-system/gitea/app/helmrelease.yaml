@@ -219,8 +219,10 @@ spec:
     schedulerName: ""
 
     ## @param nodeSelector NodeSelector for the deployment
-    nodeSelector: 
-      kubernetes.io/hostname: worker-05
+    ## Unpinned when worker-05 was retired. Gitea's storage is ceph-block
+    ## (see global.storageClass and persistence.storageClass), which is
+    ## reachable from any node, so this deployment has no reason to be pinned.
+    nodeSelector: {}
 
     ## @param tolerations Tolerations for the deployment
     tolerations: []

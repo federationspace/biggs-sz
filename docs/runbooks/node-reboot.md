@@ -10,6 +10,11 @@ hung in late shutdown and had to be recovered the hard way.
 >
 > Two open items, both out of scope for this work:
 > - **worker-05 has a hardware thermal fault** and cannot reboot unattended.
+>   **RESOLVED 2026-09-13 by retirement**, not by repair: the node was replaced
+>   by `worker-02` (GMKtec NucBox K17). See
+>   `.hermes/plans/2026-09-12_184500-replace-worker05-with-worker02.md` and
+>   `docs/runbooks/add-cluster-node.md`. If worker-05 ever returns to service,
+>   this caveat returns with it.
 > - **control-00 wastes 2 min per boot** on an unplugged NIC (netplan one-liner).
 >
 > Full narrative and the permanent host changes are in

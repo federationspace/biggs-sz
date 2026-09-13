@@ -38,7 +38,7 @@ worth much anyway, so that's stickiness I can live with.
 ## Cluster layout
 
 - Single k3s control plane node: `control-00` (the NAS, see above).
-- Worker nodes: `worker-00`, `worker-01`, `worker-05`.
+- Worker nodes: `worker-00`, `worker-01`.
 - Note: `CiliumLoadBalancerIPPool` + BGP handles `LoadBalancer` IPs,
   **not** MetalLB (a MetalLB Helm repository source still exists in
   `flux-system/sources` but is currently unused/legacy).
@@ -163,7 +163,7 @@ Secrets follow a two-tier model:
 
 ## Hardcoded values to change if you fork this
 
-- `kubernetes.io/hostname: control-00` / `worker-00` / `worker-01` / `worker-05`,
+- `kubernetes.io/hostname: control-00` / `worker-00` / `worker-01`,
   node pins for control-plane-hosted and iGPU-transcoding workloads.
 - `CiliumLoadBalancerIPPool` blocks in `kube-system/cilium/bgp/bgp-config.yaml`,
   the LoadBalancer IP range.
