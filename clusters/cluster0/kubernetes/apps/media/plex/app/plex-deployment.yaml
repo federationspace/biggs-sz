@@ -15,7 +15,9 @@ spec:
         app: plex
     spec:
       nodeSelector:
-        kubernetes.io/hostname: worker-00
+        # worker-01 is Raptor Lake and uses the i915 driver, so the
+        # gpu.intel.com/i915 request below stays correct.
+        kubernetes.io/hostname: worker-01
       containers:
         - name: plex
           image: plexinc/pms-docker:latest

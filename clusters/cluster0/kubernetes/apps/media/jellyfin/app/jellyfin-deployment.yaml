@@ -15,8 +15,9 @@ spec:
         app: jellyfin
     spec:
       nodeSelector:
-        #gpu: intel
-        kubernetes.io/hostname: worker-01
+        # worker-02 (Lunar Lake). Its iGPU is driven by xe, not i915, so the
+        # GPU resource below must match; see the resources block.
+        kubernetes.io/hostname: worker-02
       containers:
         - name: jellyfin
           image: jellyfin/jellyfin:latest
@@ -40,19 +41,26 @@ spec:
               mountPath: /media
           resources:
             limits:
-              gpu.intel.com/i915: "1"
+              gpu.intel.com/xe: "1"
               memory: 4Gi
             requests:
-              gpu.intel.com/i915: "1"
+              gpu.intel.com/xe: "1"
               memory: 4Gi
               cpu: "1"
       volumes:
         - name: jellyfin-config
           persistentVolumeClaim:
             claimName: jellyfin-config-ceph
+        # Transcode scratch, deliberately NOT a PVC. The previous local-path
+        # claim grew to 107 GiB of orphaned segments and filled worker-01's
+        # root disk, which put the node in DiskPressure and evicted the Intel
+        # GPU plugin, taking jellyfin down cluster-wide. local-path does not
+        # enforce the PVC's requested size; kubelet DOES enforce an emptyDir
+        # sizeLimit and evicts the pod if it is exceeded. This matters more on
+        # worker-02, whose 150G root shares a spindle with the Ceph OSD LV.
         - name: jellyfin-cache
-          persistentVolumeClaim:
-            claimName: jellyfin-cache
+          emptyDir:
+            sizeLimit: 40Gi
         - name: jellyfin-media-pvc
           persistentVolumeClaim:
             claimName: media-pvc
