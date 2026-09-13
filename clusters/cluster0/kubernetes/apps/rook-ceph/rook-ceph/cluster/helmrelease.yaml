@@ -39,9 +39,11 @@ spec:
               # answered its admin socket in >5s during peering, which tripped
               # the default 5s x 3 liveness probe and put the OSD in a
               # kill/re-peer flap loop (1200+ restarts, cluster stuck 33%
-              # degraded). That node is gone, but keep the headroom: it is
-              # harmless on a fast disk, and rediscovering this the hard way
-              # after a future flap costs an outage.
+              # degraded). That node is gone, but keep the headroom. It is
+              # harmless on a fast disk, rediscovering this the hard way after a
+              # future flap costs an outage, and it is directly relevant again:
+              # worker-02 carries that same physical NVMe and, like worker-05,
+              # shares it between root and the OSD.
               timeoutSeconds: 30
               failureThreshold: 6
       cephConfig:
@@ -106,6 +108,15 @@ spec:
             devices:
               - name: /dev/mapper/ubuntu--vg-lvceph
           - name: worker-01
+            devices:
+              - name: /dev/mapper/ubuntu--vg-lvceph
+          # worker-02 (GMKtec NucBox K17) replaced worker-05 on 2026-09-13 and
+          # carries worker-05's original NVMe. Only one M.2 slot is populated,
+          # so root and the OSD share a spindle, same as worker-05 did. That
+          # contention is part of why osd.2 ran at ~24ms apply latency against
+          # 4-8ms on its peers, so move this to a dedicated whole-disk by-id
+          # device once a second NVMe is fitted.
+          - name: worker-02
             devices:
               - name: /dev/mapper/ubuntu--vg-lvceph
         config:

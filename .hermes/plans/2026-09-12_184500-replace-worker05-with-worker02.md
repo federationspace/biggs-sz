@@ -48,6 +48,132 @@ Phase 4, not before.
 force-delete loop are now largely moot; the pods terminated cleanly. Re-check
 what actually remains before running that step rather than running it blind.
 
+**2026-09-13, Phase 1 (PR #152) — DONE and merged.** osd.2 purged,
+`worker-05` removed from the CRUSH map, both Git references dropped. The CRUSH
+tree is now two hosts (`worker-00`, `worker-01`), the `worker-05` Node object is
+deleted, and the stale `rook-ceph-osd-2` Deployment plus
+`rook-ceph-osd-prepare-worker-05` Job were removed by hand (Rook does not garbage
+collect these). `noin`/`nobackfill` remain set, as intended.
+
+Post-merge, reconciliation surfaced **three problems unrelated to worker-05.**
+All three are now fixed, but they are latent repo/cluster bugs worth knowing
+about before the next node swap:
+
+1. **Cilium `ipv4NativeRoutingCIDR` was wrong.** Git declared
+   `10.244.0.0/16` (the Flannel/kubeadm default) but this is k3s, whose pod CIDR
+   is `10.42.0.0/16`. Because pod traffic fell outside the declared CIDR, Cilium
+   SNAT'd cross-node pod traffic to the node IP, so it arrived with Cilium
+   identity `remote-node` instead of the pod's own identity and was denied by the
+   `flux-system` NetworkPolicies:
+
+   ```
+   xx drop (Policy denied) identity remote-node->120102:
+   192.168.2.117:47846 -> 10.42.0.232:9090 tcp SYN
+   ```
+
+   This only bites namespaces that *have* NetworkPolicies, which is why the
+   cluster looked healthy for months: `flux-system` has them because the
+   `FluxInstance` sets `networkPolicy: true`. It surfaced only when the
+   worker-05 eviction scattered the Flux controllers across nodes;
+   kustomize-controller (worker-01) could no longer reach source-controller
+   (control-00), so **every Kustomization froze at a stale revision.**
+   **Still unfixed in Git** — see open items.
+
+2. **`FluxInstance` had a floating version.** `spec.distribution.version: "2.x"`
+   against flux-operator v0.41.1. `2.x` had drifted past the last good build
+   (v2.8.8) to a release whose `Receiver` CRD layout the operator's built-in
+   patch no longer matched, so the FluxInstance went `Stalled=True` with an
+   `eventSources` enum error the moment it was next applied. Pinning the version
+   cleared it. This was a time bomb that would have fired at the next hourly
+   reconcile regardless of the node work.
+
+3. **worker-01 hit `DiskPressure`, which took jellyfin offline.** Jellyfin's
+   `jellyfin-cache` PVC is `local-path` with a 100Gi request, but **local-path
+   does not enforce capacity** — the transcode directory had grown to **107.6 GiB
+   across 4,100 orphaned segment files** on a 147 GiB root disk (88% full). The
+   resulting `DiskPressure` evicted the `intel-gpu-plugin` DaemonSet pod, so
+   worker-01 advertised `gpu.intel.com/i915: 0`, and jellyfin (which *requests* 1)
+   became unschedulable cluster-wide. Clearing `transcodes/` took the disk from
+   88% to 11%. Note kubelet takes ~5 minutes to clear the `DiskPressure`
+   condition, and the evicted DaemonSet pod must be deleted by hand before the
+   DaemonSet will replace it.
+
+**Services restored:** gitea (`HelmRelease` green, pod `1/1` on control-00),
+jellyfin (`1/1` on worker-01 with `/dev/dri` and `i915: 1`, `/health` = 200),
+renovate, hermes. 11 evicted pods swept.
+
+**Also repaired:** `gitea-valkey-cluster` had lost a master. The cluster is 3
+masters with **no replicas**, and the one owning slots 5461-10922 lived on
+worker-05 on `local-path` — unrecoverable from the moment the node died, and
+Task 1.4's PVC deletion left node-1 booting with a blank `nodes.conf`. Repaired
+in place with `CLUSTER MEET` + `CLUSTER FORGET` + reassigning the 5,462 orphaned
+slots; `cluster_state:ok`, all 16384 slots covered. Only cache data was lost
+(gitea sessions/queues); repos are on `ceph-block` and Postgres was healthy 3/3.
+
+**2026-09-13, Phases 2-3 — worker-02 JOINED AND `Ready`.** The K17 is in the
+cluster at `192.168.2.60`, k3s `v1.34.3+k3s1`, kernel **7.0.0-31-generic**.
+Hardware confirmed as GMKtec NucBox K17, Core Ultra 5 226V, 8 threads, 16 GB,
+Intel I226-V NIC, Lunar Lake iGPU `[8086:64a0]`. Idles at **27.8 C** versus
+worker-05's 67 C, so the thermal fault was the chassis, not the workload.
+
+Deviations from what this plan assumed, all now settled:
+
+- **Only ONE NVMe is installed** — the carried 953.9 GB drive from worker-05,
+  serial `20121410240044`. The K17 shipped barebones, or its second slot is
+  unpopulated. This is **Contingency A**: the installer reproduced worker-05's
+  exact layout, 150 GB root + a 775 GB `ubuntu-vg/lvceph` LV on the same
+  spindle. Decision: **proceed with the shared-disk OSD now, add a dedicated
+  NVMe later.** Phase 4 therefore uses `/dev/mapper/ubuntu--vg-lvceph`, not a
+  whole-disk `by-id` path.
+- **The NIC links at 1000 Mb/s, not 2.5 GbE.** The controller is 2.5 GbE
+  capable, so the limit is the switch port or the cable. Worth chasing later;
+  it does not block anything, and every peer is 1 GbE anyway.
+- **The HWE kernel was mandatory, exactly as predicted, and for the predicted
+  reason.** Ubuntu 24.04.4 installed with GA 6.8.0-139, which bound `xe` but
+  exposed **only `card0`, no `renderD128`** — no render node means no hardware
+  transcoding. Installing `linux-generic-hwe-24.04` (7.0.0-31) created
+  `renderD128` on the next boot. Note the K17's I226-V NIC *did* work on GA, so
+  the feared "no network in the installer" scenario did not happen.
+
+**Host fixes applied and verified live** (section 6 of the runbook): the kubelet
+drop-in reads back through `/configz` as `shutdownGracePeriod: 3m0s` /
+`shutdownGracePeriodCriticalPods: 1m0s`, and the logind override gives
+`InhibitDelayMaxUSec = t 180000000`, with kubelet holding a visible `delay`
+inhibitor. The filename-collision trick worked: Ubuntu ships its own
+`unattended-upgrades-logind-maxdelay.conf` in `/usr/lib/systemd/logind.conf.d/`
+setting 30s, and reusing that exact name in `/etc/` overrides it.
+
+**DaemonSets self-scheduled** as expected: cilium, cilium-envoy, NFD worker,
+intel-gpu-plugin, rook-discover, rook RBD CSI nodeplugin, cloudflared, the
+victoria-logs/metrics collectors, and atelet.
+
+**NEW FINDING, blocks media workloads on this node: the GPU resource is named
+`gpu.intel.com/xe`, not `gpu.intel.com/i915`.** Lunar Lake is driven by the
+`xe` kernel driver; worker-00/01's Coffee Lake iGPUs use `i915`. intel-gpu-plugin
+v0.34.0 handles both, but names the advertised resource after the driver:
+
+| Node | Driver | Resource advertised |
+| --- | --- | --- |
+| worker-00 | `i915` | `gpu.intel.com/i915: 4` |
+| worker-01 | `i915` | `gpu.intel.com/i915: 4` |
+| **worker-02** | **`xe`** | **`gpu.intel.com/xe: 4`** |
+
+jellyfin and plex both request `gpu.intel.com/i915: "1"` and therefore **cannot
+schedule onto worker-02** as written. This is not a failure — the GPU works and
+is advertised — but it contradicts this plan's Phase 3 claim that "the NFD rule
+already matches `xe`" and that GPU capacity would be a free bonus. The node
+label `intel.feature.node.kubernetes.io/gpu=true` is identical across all three
+nodes, so *labels* are not the problem; the *resource name* is. See open items.
+
+**Pre-existing failures that also appear on worker-02, NOT caused by the join:**
+`runsc-cache` (cannot reach `rustfs.ai-system.svc:9000`, part of the dead
+ai-system stack) and `netbird-client` (403 from `netbird.biggs.dog`). Both
+crash-loop identically on every other node, with 28-29h uptimes predating this
+work.
+
+**Still outstanding:** `noin`/`nobackfill` remain set and Ceph is still
+`HEALTH_ERR` at 2 OSDs. Phase 4 has not been started.
+
 ---
 
 ## Current context
@@ -93,10 +219,14 @@ instead of 1 GbE, and no thermal fault.
 2. **The K17's stock NVMe becomes the Ceph OSD**, in the **Gen5 x4** slot.
    OSD latency is what the cluster feels; the old node's OSD was the slow one
    partly because it shared a spindle with root.
-3. **Reuse 192.168.2.84** for worker-02.
+3. **worker-02 gets the static IP 192.168.2.60**, configured on the host via
+   netplan, not a DHCP reservation. This is a new address, not worker-05's old
+   192.168.2.84, so there is no reservation to move and no conflict with the old
+   box. Login is the standard fleet account.
 4. **worker-05 may return later as a separate node.** It is therefore retired
-   from the cluster but not scrapped. Its chassis will need a different disk and
-   a different IP before it is ever powered on again on this LAN.
+   from the cluster but not scrapped. Its chassis will need a different disk
+   before it is ever powered on again on this LAN. It still holds
+   192.168.2.84, which worker-02 does not use.
 
 ### The carried-over drive (measured 2026-09-13, node booted for detach)
 
@@ -347,8 +477,10 @@ exactly this combination.
 **Task 2.5: install**
 
 Installer answers: hostname **`worker-02`** (k3s takes the node name from it),
-DHCP, OpenSSH server yes, third-party drivers yes, no snaps, custom storage
-layout targeting **only** the carried-over drive.
+**static IP 192.168.2.60/24** (see Task 2.7 — you can set it in the installer's
+network screen or apply netplan after first boot), OpenSSH server yes,
+third-party drivers yes, no snaps, custom storage layout targeting **only** the
+carried-over drive.
 
 Root disk layout, mirroring worker-00 and worker-01:
 
@@ -386,7 +518,7 @@ Verify:
 
 ```sh
 uname -r                 # expect 6.14.x
-ip -br a                 # 2.5GbE up, holding 192.168.2.84
+ip -br a                 # 2.5GbE up, holding 192.168.2.60
 ls /dev/dri              # expect card0 + renderD128
 lsblk -o NAME,SIZE,MODEL,SERIAL,FSTYPE,MOUNTPOINT
 ls -l /dev/disk/by-id/nvme-* | grep -v part
@@ -394,10 +526,60 @@ ls -l /dev/disk/by-id/nvme-* | grep -v part
 
 Record the OSD disk's `by-id` path. You need it verbatim in Phase 4.
 
-**Task 2.7: DHCP reservation**
+**Task 2.7: static IP**
 
-Move the 192.168.2.84 reservation from worker-05's MAC to the K17's MAC. Do this
-before joining, so the node never changes address after k3s records it.
+worker-02 uses a **static address, 192.168.2.60/24** — not a DHCP reservation,
+and not worker-05's old 192.168.2.84. Set it before joining, so the node never
+changes address after k3s records it.
+
+Confirm the interface name first; it will not be worker-05's. On Lunar Lake with
+the 2.5 GbE NIC expect something like `enp1s0` or `enp2s0`:
+
+```sh
+ip -br link
+```
+
+Ubuntu's installer writes `/etc/netplan/50-cloud-init.yaml`. Replace its contents
+(gateway and DNS confirmed live from worker-01):
+
+```yaml
+network:
+  version: 2
+  ethernets:
+    <iface>:                       # e.g. enp1s0, from `ip -br link`
+      dhcp4: false
+      addresses:
+        - 192.168.2.60/24
+      routes:
+        - to: default
+          via: 192.168.2.1
+      nameservers:
+        addresses: [192.168.2.1]
+```
+
+```sh
+sudo chmod 600 /etc/netplan/50-cloud-init.yaml   # netplan warns if world-readable
+sudo netplan try                                  # auto-reverts in 120s if you lose the link
+sudo netplan apply
+ip -br a && ip route | head -2
+```
+
+Use `netplan try` rather than `apply` when working over SSH: a typo in the
+address or gateway otherwise locks you out and forces a trip to the console.
+
+If the installer also wrote a `99-*.yaml` or a cloud-init network config,
+neutralise it, or cloud-init will reassert DHCP on the next boot:
+
+```sh
+echo 'network: {config: disabled}' | \
+  sudo tee /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+```
+
+Reachability check from your workstation before continuing:
+
+```sh
+ping -c2 192.168.2.60 && ssh 192.168.2.60 'hostnamectl --static'   # expect worker-02
+```
 
 ---
 
@@ -481,7 +663,7 @@ control-00 does not resolve node names via cluster DNS.
 
 ```sh
 ssh 192.168.2.164 "sudo sed -i '/worker-05/d' /etc/hosts && \
-  echo '192.168.2.84   worker-02' | sudo tee -a /etc/hosts"
+  echo '192.168.2.60   worker-02' | sudo tee -a /etc/hosts"
 ```
 
 ---
@@ -616,11 +798,11 @@ flux get sources all
 ```sh
 kubectl drain worker-02 --ignore-daemonsets --delete-emptydir-data --timeout=10m
 kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph -s   # settle first
-ssh 192.168.2.84 sudo systemctl reboot
+ssh 192.168.2.60 sudo systemctl reboot
 # after it returns
 kubectl uncordon worker-02
-ssh 192.168.2.84 'journalctl -b -1 -u k3s-agent | tail -40'   # clean stop
-ssh 192.168.2.84 'journalctl -b -1 -k | grep -i libceph'      # expect nothing
+ssh 192.168.2.60 'journalctl -b -1 -u k3s-agent | tail -40'   # clean stop
+ssh 192.168.2.60 'journalctl -b -1 -k | grep -i libceph'      # expect nothing
 ```
 
 An untested node is a node whose shutdown behaviour you are guessing at. This is
@@ -631,8 +813,8 @@ the entire lesson of the 2026-08-28 postmortem.
 The box it replaces throttled from boot. Establish a baseline:
 
 ```sh
-ssh 192.168.2.84 'sensors; grep -c . /sys/class/thermal/thermal_zone*/temp'
-ssh 192.168.2.84 "awk '{print \$1/1000\"C\"}' /sys/class/thermal/thermal_zone0/temp"
+ssh 192.168.2.60 'sensors; grep -c . /sys/class/thermal/thermal_zone*/temp'
+ssh 192.168.2.60 "awk '{print \$1/1000\"C\"}' /sys/class/thermal/thermal_zone0/temp"
 ```
 
 Under sustained load, a healthy K17 should sit well below 95 C. If it does not,
@@ -657,6 +839,59 @@ are manual on every node, forever, until that changes.
 ---
 
 ## Risks and open questions
+
+**OPEN, needs a PR: jellyfin and plex cannot use worker-02's GPU.** They request
+`gpu.intel.com/i915`, but Lunar Lake's `xe` driver makes the plugin advertise
+`gpu.intel.com/xe`. Options, in order of preference:
+
+1. Make the deployments request the resource matching the node they target. A
+   single Deployment cannot request "either", so this means either pinning
+   media workloads to `i915` nodes (status quo, worker-02 gets no media), or
+   splitting per node class.
+2. Run a second intel-gpu-plugin DaemonSet on `xe` nodes with
+   `-resource-name gpu.intel.com/i915`, if the plugin version supports
+   overriding it, so the fleet presents one uniform resource name.
+3. Accept it: worker-02 does compute, worker-00/01 keep transcoding.
+
+Do **not** simply flip jellyfin to `gpu.intel.com/xe` — that would strand it on
+worker-02 alone and break its current placement on worker-01.
+
+**OPEN: worker-02's NIC negotiated 1 Gb/s on a 2.5 GbE controller.** Check the
+switch port and cable. Not blocking, since every peer is 1 GbE.
+
+**OPEN: worker-02 runs root and the Ceph OSD on one spindle** (Contingency A,
+accepted deliberately). This is the arrangement that made osd.2 the slow OSD at
+24ms apply latency. Fit a dedicated NVMe in the free M.2 slot when one is
+available, then migrate the OSD to a whole-disk `by-id` device and reclaim
+`lvceph`.
+
+**OPEN: a NOPASSWD sudoers file was added to worker-02** at
+`/etc/sudoers.d/90-szkud-nopasswd`, to let the automated install run unattended.
+The other nodes require a sudo password. Either remove it for consistency or
+adopt it fleet-wide as a deliberate choice; do not leave it as an undocumented
+one-off.
+
+**OPEN, needs its own PR: the Cilium `ipv4NativeRoutingCIDR` fix is only applied
+live, not in Git.** `clusters/cluster0/kubernetes/apps/kube-system/cilium/app/helmrelease.yaml`
+still says `10.244.0.0/16`; it must become `10.42.0.0/16`. Until that merges, any
+Flux reconcile of the cilium HelmRelease re-introduces the bug. Applying it
+restarts the Cilium agents and briefly disrupts pod networking cluster-wide, so
+**do it while Ceph is healthy at 3 hosts, i.e. after Phase 4, not during the
+degraded window.**
+
+**OPEN, mitigation in place only: the Flux controllers are pinned to control-00**
+via a `FluxInstance` nodeSelector, as a workaround for the CIDR bug. Once the
+CIDR fix merges and is verified, remove the pin so the controllers can spread
+again. Leaving it pinned indefinitely makes control-00 a single point of failure
+for all of GitOps.
+
+**OPEN: jellyfin's transcode cache has no size bound.** `local-path` does not
+enforce the PVC's 100Gi request, so the cache can and did fill worker-01's root
+disk, evicting the GPU plugin and taking jellyfin down. Fix properly by setting
+jellyfin's transcode path to an `emptyDir` with a `sizeLimit`, or enable a
+Jellyfin cache-cleanup schedule. **This risk follows jellyfin to whichever node
+it lands on, including worker-02.** Until it is fixed, check
+`df -h /` on the media node during Phase 6.
 
 **Ceph capacity is bounded by the smallest OSD.** With `failureDomain: host`,
 `size: 3`, and three OSD hosts, usable capacity is effectively the smallest OSD.
@@ -684,7 +919,7 @@ Ethernet dongle for the install. Budget for this; it is the most likely snag.
 If the wired NIC is unsupported, fix the wired NIC.
 
 **worker-05's later return.** It comes back only with a new disk and a new IP
-reservation, and it must never be powered on while holding 192.168.2.84. Before
+reservation, and it must never be powered on while holding 192.168.2.60. Before
 reusing it, confirm its thermal fault is actually fixed; per the postmortem it
 was accumulating ~20,717 throttle events and hit 92-95 C. A node that cannot
 reboot unattended is not a cluster member, it is a liability.
