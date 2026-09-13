@@ -37,20 +37,6 @@ spec:
     # size: "10Gi"
   kustomize:
     patches:
-      # TEMPORARY (2026-09-13): all Flux controllers are pinned to control-00.
-      #
-      # cilium's ipv4NativeRoutingCIDR is 10.244.0.0/16 but this cluster's pod
-      # CIDR is 10.42.0.0/16 (k3s default), so cross-node pod traffic gets
-      # masqueraded to the node IP and arrives with cilium identity
-      # "remote-node" instead of a flux-system pod identity. The netpols that
-      # cluster.networkPolicy=true generates then deny it, and kustomize-
-      # controller cannot reach source-controller when they land on different
-      # nodes. Co-locating them sidesteps it: same-node traffic is not
-      # masqueraded.
-      #
-      # Remove this hostname pin once ipv4NativeRoutingCIDR is corrected in
-      # kube-system/cilium/app/helmrelease.yaml. Until then Flux has no node
-      # redundancy and stops entirely if control-00 is down.
       - target:
           kind: Deployment
         patch: |
@@ -58,7 +44,6 @@ spec:
             path: /spec/template/spec/nodeSelector
             value:
               kubernetes.io/os: linux
-              kubernetes.io/hostname: control-00
           - op: add
             path: /spec/template/spec/tolerations
             value:
