@@ -75,7 +75,7 @@ kubernetes/apps/<ns>/<app>/
   the `io.cilium/lb-ipam-ips` annotation, **not** `spec.loadBalancerIP`. A
   MetalLB HelmRepository source and a live `metallb-system` namespace still
   exist; both are legacy and unused.
-  Assigned VIPs: `.6` irc, `.7` k8s-gateway, `.8` lan-dns, `.9`
+  Assigned VIPs: `.7` k8s-gateway, `.8` lan-dns, `.9`
   wildcard-gregbob-net Gateway.
 - **Ingress lives in `network/`**: `agentgateway` (the Gateway API
   implementation, Gateway `wildcard-gregbob-net`), `k8s-gateway` (DNS
