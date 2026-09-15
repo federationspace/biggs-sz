@@ -44,8 +44,9 @@ worth much anyway, so that's stickiness I can live with.
   `flux-system/sources`, and a `metallb-system` namespace still exists in the
   cluster, but both are unused legacy). Pin a VIP with the
   `io.cilium/lb-ipam-ips` annotation rather than `spec.loadBalancerIP`.
-- Assigned VIPs from the pool (`192.168.2.6-192.168.2.254`): `.6` IRC, `.7`
-  k8s-gateway, `.8` lan-dns, `.9` the `wildcard-gregbob-net` Gateway.
+- Assigned VIPs from the pool (`192.168.2.6-192.168.2.254`): `.7`
+  k8s-gateway, `.8` lan-dns, `.9` the `wildcard-gregbob-net` Gateway. `.6` is
+  free (it was the IRC VIP, removed 2026-09-14).
 
 See **Core components** below for storage, networking, secrets, and
 certificate details.
@@ -63,7 +64,7 @@ clusters/cluster0/
     ├── databases/                # cnpg (CloudNativePG)
     ├── external-secrets/         # external-secrets, onepassword-connect
     ├── git-system/                # gitea, act_runner
-    ├── gregbob/                   # gregbob, personal site/services + IRC
+    ├── gregbob/                   # gregbob, personal site/services
     ├── kube-system/                # cilium (CNI + BGP/L2), nfs, nfd, intel-gpu-plugin,
     │                              # volsync, snapshot-controller
     ├── matrix/                    # continuwuity, sable
@@ -179,7 +180,7 @@ Secrets follow a two-tier model:
   node pins for control-plane-hosted, iGPU-transcoding, and Matrix workloads.
 - `CiliumLoadBalancerIPPool` blocks in `kube-system/cilium/bgp/bgp-config.yaml`,
   the LoadBalancer IP range, plus the `io.cilium/lb-ipam-ips` annotations that
-  pin individual VIPs (`lan-dns`, `irc`).
+  pin individual VIPs (`lan-dns`).
 - `provisioner: nfs` / NFS server IP, your NFS export.
 - The NextDNS resolver IPs and profile SNI in `network/lan-dns/app/configmap.yaml`
   and `network/k8s-gateway/app/helmrelease.yaml`, plus the hardcoded
