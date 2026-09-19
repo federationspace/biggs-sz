@@ -44,7 +44,24 @@ spec:
               # hairpins through the gateway to livekit-service:7880.
               value: "wss://livekit.gregbob.net"
             - name: LIVEKIT_FULL_ACCESS_HOMESERVERS
-              value: "gregbob.net"
+              # This list is the ONLY thing that decides `can_publish` on the
+              # minted JWT. In lk-jwt-service, `is_full_access_user()` tests the
+              # token's matrix_server_name against these entries and passes the
+              # result straight through as the LiveKit VideoGrants.can_publish;
+              # everyone else still gets can_subscribe: true. So a user from an
+              # unlisted homeserver joins fine, hears and sees everyone, and can
+              # never send audio or video — which presents as a one-way call and
+              # a permanent "waiting for media…", NOT as an error.
+              #
+              # biggs.dog is listed because @dukzs:biggs.dog hit exactly that.
+              # Add a homeserver here to let its users publish.
+              #
+              # Separator is space or comma (the parser does
+              # `.replace(',', " ").split_whitespace()`). A lone "*" is
+              # special-cased to mean every homeserver, which is deliberately
+              # NOT used: room membership would then be the only gate on who can
+              # push media through a hostNetwork pod on worker-01.
+              value: "gregbob.net biggs.dog"
             - name: LIVEKIT_KEY
               valueFrom:
                 secretKeyRef:
