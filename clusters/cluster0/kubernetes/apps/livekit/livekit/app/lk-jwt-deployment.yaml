@@ -1,0 +1,85 @@
+---
+# lk-jwt-service: MatrixRTC authorization service — authenticates Matrix users
+# and issues JWT tokens for LiveKit room access.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lk-jwt-service
+  namespace: livekit
+  labels:
+    app.kubernetes.io/name: lk-jwt-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: lk-jwt-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: lk-jwt-service
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      containers:
+        - name: lk-jwt-service
+          image: ghcr.io/element-hq/lk-jwt-service:0.7.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: LIVEKIT_JWT_BIND
+              value: ":8081"
+            - name: LIVEKIT_URL
+              # One URL, two jobs (verified in lk-jwt-service source): dialed
+              # in-cluster to auto-create rooms AND returned verbatim to clients
+              # in the /get_token response (SFUResponse{url,jwt}) — there is no
+              # separate client-URL setting. It must be the public wss URL
+              # (cluster-internal is unreachable for real clients; ws:// is
+              # mixed-content-blocked on https pages). In-cluster, k8s-gateway
+              # resolves livekit.gregbob.net to the gateway VIP (192.168.2.9)
+              # the moment the livekit HTTPRoute exists, so the control channel
+              # hairpins through the gateway to livekit-service:7880.
+              value: "wss://livekit.gregbob.net"
+            - name: LIVEKIT_FULL_ACCESS_HOMESERVERS
+              value: "gregbob.net"
+            - name: LIVEKIT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: livekit-credentials
+                  key: LIVEKIT_KEY
+            - name: LIVEKIT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: livekit-credentials
+                  key: LIVEKIT_SECRET
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            limits:
+              memory: 128Mi
+            requests:
+              memory: 64Mi
+              cpu: "0.1"

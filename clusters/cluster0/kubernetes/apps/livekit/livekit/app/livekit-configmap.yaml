@@ -1,0 +1,44 @@
+---
+# LiveKit SFU server config (livekit.yaml).
+#
+# DEVIATION from the biggs.dog reference: NO `keys:` here. The API key/secret
+# come from 1Password via the livekit-credentials ExternalSecret and are passed
+# to the binary at startup via --keys (see livekit-deployment.yaml). The
+# reference hardcoded the pair in this file; we never commit credentials.
+#
+# LAN-only (DEVIATION #2): we advertise the worker's LAN IP only. use_external_ip
+# is false (its default), so there is no STUN dependency and no NAT-hairpin
+# failure mode. `ips.includes` gathers host candidates from the worker NIC only,
+# otherwise every hostNetwork interface (cilium_*, docker0, tailscale0, ...) is
+# advertised too. To extend to internet clients later, add a UDM forward of
+# UDP 50100 + TCP 7881 -> 192.168.2.117 and set use_external_ip +
+# advertise_internal_ip + skip_external_ip_validation in this file.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: livekit-config
+  namespace: livekit
+  labels:
+    app.kubernetes.io/name: livekit
+data:
+  livekit.yaml: |
+    port: 7880
+    bind_addresses:
+      - 0.0.0.0
+    rtc:
+      tcp_port: 7881
+      # Single UDP port shared by ALL peer connections via pion's UDPMux.
+      # udp_port (mux), NOT port_range_*: a 1-port ephemeral range gives each
+      # PeerConnection its own socket, so the second concurrent participant
+      # fails to bind 50100 and silently drops to ICE-TCP. Matches the JVB
+      # single-UDP-port model.
+      udp_port: 50100
+      # Advertise the worker-01 LAN IP (192.168.2.117) as the host candidate.
+      node_ip: 192.168.2.117
+      # LAN-only: do not STUN-detect / advertise a WAN IP (see header).
+      use_external_ip: false
+      enable_loopback_candidate: false
+      # Gather host candidates from the node LAN NIC only (worker is 192.168.2.117).
+      ips:
+        includes:
+          - 192.168.2.0/24

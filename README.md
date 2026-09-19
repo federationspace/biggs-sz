@@ -67,6 +67,8 @@ clusters/cluster0/
     ├── gregbob/                   # gregbob, personal site/services
     ├── kube-system/                # cilium (CNI + BGP/L2), nfs, nfd, intel-gpu-plugin,
     │                              # volsync, snapshot-controller
+    ├── livekit/                   # livekit (self-hosted LiveKit SFU + lk-jwt-service,
+    │                              # MatrixRTC for Matrix calls on gregbob.net)
     ├── matrix/                    # continuwuity, sable
     ├── media/                     # jellyfin, plex, sonarr, radarr, lidarr, readarr, prowlarr,
     │                             # sabnzbd, ombi, homarr, romm, rreading-glasses, epub-only,
@@ -88,6 +90,15 @@ clusters/cluster0/
 | agentgateway | Gateway API implementation; HTTPRoutes attach to the shared Gateway `wildcard-gregbob-net` in `network` by name (no `sectionName`), reachable at VIP `192.168.2.9` |
 | [k8s-gateway](https://github.com/ori-edge/k8s_gateway) | DNS authority for the `gregbob.net` zone; watches HTTPRoutes and annotated Services and answers with their LAN VIPs. Two replicas with node anti-affinity, falling through unknown names to NextDNS |
 | lan-dns | CoreDNS LAN resolver at VIP `192.168.2.8`, the address the router hands out over DHCP. Forwards `gregbob.net` to k8s-gateway's ClusterIP and everything else to NextDNS over DoT |
+
+> **LiveKit media is LAN-only and bypasses the gateway.** Signaling (HTTP/WS)
+> for `livekit.gregbob.net` rides the `wildcard-gregbob-net` gateway like any
+> other route. WebRTC *media* cannot go through it: the SFU runs
+> `hostNetwork` on `worker-01` and advertises that node's LAN IP
+> (`192.168.2.117`), with a single multiplexed UDP port `50100` plus ICE-TCP
+> `7881`. A `livekit-media` LoadBalancer at VIP `192.168.2.10` is kept as a
+> standby/rollback path (see `kubernetes/apps/livekit/`). Extending media to
+> internet clients is a deliberate follow-up (UDM forward + `use_external_ip`).
 
 Public traffic reaches the cluster through a router port-forward of 80/443 to
 the gateway VIP `192.168.2.9`, with Cloudflare proxying in front of it
