@@ -5,8 +5,13 @@
 # media never goes through the gateway.
 #
 # Pinned to worker-01 (192.168.2.117). hostNetwork + a single UDP port means a
-# second copy would collide, so replicas: 1 + Recreate. The advertised host
-# candidate is the node LAN IP (see livekit-configmap.yaml, LAN-only by design).
+# second copy would collide, so replicas: 1 + Recreate.
+#
+# The pin is LOAD-BEARING, not just collision avoidance: the UDM forwards
+# UDP 50100 + TCP 7881 to 192.168.2.117 by IP (see livekit-configmap.yaml). If
+# this pod is ever allowed to schedule elsewhere, LAN calls keep working and
+# remote calls silently fail, which is the worst failure shape. Replacing or
+# renaming worker-01 means moving those two forwards in the same change.
 #
 # Credentials: NO keys in the config file. The ExternalSecret yields two
 # separate envs (LIVEKIT_KEY, LIVEKIT_SECRET); the SFU binary wants a single

@@ -6,13 +6,16 @@
 # to the binary at startup via --keys (see livekit-deployment.yaml). The
 # reference hardcoded the pair in this file; we never commit credentials.
 #
-# LAN-only (DEVIATION #2): we advertise the worker's LAN IP only. use_external_ip
-# is false (its default), so there is no STUN dependency and no NAT-hairpin
-# failure mode. `ips.includes` gathers host candidates from the worker NIC only,
-# otherwise every hostNetwork interface (cilium_*, docker0, tailscale0, ...) is
-# advertised too. To extend to internet clients later, add a UDM forward of
-# UDP 50100 + TCP 7881 -> 192.168.2.117 and set use_external_ip +
-# advertise_internal_ip + skip_external_ip_validation in this file.
+# WAN-reachable media. Signaling (7880) reaches clients through the
+# wildcard-gregbob-net gateway behind Cloudflare, which carries HTTP only, so
+# ICE can never use it: media has to hit a real address. The UDM forwards
+# UDP 50100 + TCP 7881 -> 192.168.2.117 (worker-01), and the SFU advertises
+# both the WAN IP and the LAN IP as host candidates.
+#
+# The forward names worker-01 by IP, so the Deployment's nodeSelector is
+# load-bearing, not a convenience: if the pod moves, LAN calls keep working and
+# remote calls silently fail. Moving or replacing worker-01 means moving the two
+# UDM forwards with it (see docs/runbooks/add-cluster-node.md).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -33,12 +36,37 @@ data:
       # fails to bind 50100 and silently drops to ICE-TCP. Matches the JVB
       # single-UDP-port model.
       udp_port: 50100
-      # Advertise the worker-01 LAN IP (192.168.2.117) as the host candidate.
-      node_ip: 192.168.2.117
-      # LAN-only: do not STUN-detect / advertise a WAN IP (see header).
-      use_external_ip: false
+      # STUN-detect the WAN IP and install a NAT 1:1 rewrite rule
+      # (<wan>/192.168.2.117), so remote peers get a candidate they can
+      # actually reach. NOTE: this makes startup depend on STUN — config
+      # validation retries 3x then FAILS, so a WAN outage at pod start is a
+      # crashloop rather than a fallback to LAN-only. An already-running pod is
+      # unaffected. No `node_ip` here on purpose: use_external_ip overwrites it
+      # during validation, so setting it would be dead config that reads as if
+      # it still chose the candidate.
+      use_external_ip: true
+      # Append the LAN candidate instead of replacing it. Without this the
+      # rewrite rule is exclusive and LAN/VPN clients lose their direct path,
+      # hairpinning out through the router. This is what keeps local calls
+      # working; it is not optional.
+      advertise_internal_ip: true
+      # Skip the post-STUN self-check, which listens on 50100 and dials the
+      # node's own WAN IP expecting the packet back. That needs UDP NAT hairpin;
+      # the UDM hairpins TCP 443 but UDP hairpin is a separate behaviour. On
+      # failure the server would fall back to advertising the external IP ONLY,
+      # breaking LAN clients until restart — the exact failure this whole block
+      # is trying to avoid.
+      skip_external_ip_validation: true
+      # Pinned explicitly (these are the built-in defaults) so the startup
+      # dependency is visible in Git rather than hidden in the binary.
+      stun_servers:
+        - stun.l.google.com:19302
+        - stun1.l.google.com:19302
       enable_loopback_candidate: false
-      # Gather host candidates from the node LAN NIC only (worker is 192.168.2.117).
+      # Gather host candidates from the node LAN NIC only (worker is
+      # 192.168.2.117), and limit STUN probing to that one interface. Without
+      # it every hostNetwork interface (cilium_*, docker0, ...) is probed and
+      # advertised, and clients waste ICE time on unreachable candidates.
       ips:
         includes:
           - 192.168.2.0/24
