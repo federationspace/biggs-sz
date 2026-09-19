@@ -1,0 +1,45 @@
+---
+# LoadBalancer for LiveKit WebRTC MEDIA (not signaling — that stays on the
+# wildcard-gregbob-net gateway via livekit-route.yaml -> livekit-service:7880).
+#
+# STANDBY / rollback path. In the LAN-only design (see livekit-configmap.yaml)
+# LiveKit advertises the worker-01 LAN IP directly, so nothing is expected to
+# hit this VIP day-to-day. It is kept so a later LAN/VPN-or-WAN redesign
+# (advertise the VIP instead of the node IP) is a configmap-only change and so
+# the VIP keeps answering on 50100/7881 for anything pinned to it.
+#
+# 192.168.2.10 is a free address inside the Cilium LB IPAM pool
+# (192.168.2.6-192.168.2.254); .7 = k8s-gateway, .8 = lan-dns,
+# .9 = wildcard-gregbob-net. No MetalLB here, so the VIP is pinned with the
+# Cilium annotation (matches network/lan-dns).
+#
+# externalTrafficPolicy Cluster so the VIP works regardless of which node a
+# client reaches; the hostNetwork backend (worker-01) is reached via the
+# cluster datapath.
+apiVersion: v1
+kind: Service
+metadata:
+  name: livekit-media-service
+  namespace: livekit
+  labels:
+    app.kubernetes.io/name: livekit
+  annotations:
+    io.cilium/lb-ipam-ips: "192.168.2.10"
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Cluster
+  selector:
+    app.kubernetes.io/name: livekit
+  ports:
+    - name: rtc-tcp
+      port: 7881
+      protocol: TCP
+      targetPort: 7881
+    - name: rtc-udp
+      port: 50100
+      protocol: UDP
+      targetPort: 50100
+      # LiveKit is configured with a single multiplexed RTC UDP port shared by
+      # all peer connections (udp_port: 50100 -> pion UDPMux, see
+      # livekit-configmap.yaml), so this 1:1 Service mapping exposes the entire
+      # media path through the VIP — same model as the Jitsi JVB (single UDP).

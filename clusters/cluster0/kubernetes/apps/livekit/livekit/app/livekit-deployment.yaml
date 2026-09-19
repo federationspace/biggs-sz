@@ -1,0 +1,109 @@
+---
+# LiveKit SFU — hostNetwork for UDP media relay (single multiplexed port 50100
+# via pion UDPMux) and ICE-TCP 7881. HTTP/WS signaling on 7880 is proxied to
+# clients through the wildcard-gregbob-net gateway (see livekit-route.yaml);
+# media never goes through the gateway.
+#
+# Pinned to worker-01 (192.168.2.117). hostNetwork + a single UDP port means a
+# second copy would collide, so replicas: 1 + Recreate. The advertised host
+# candidate is the node LAN IP (see livekit-configmap.yaml, LAN-only by design).
+#
+# Credentials: NO keys in the config file. The ExternalSecret yields two
+# separate envs (LIVEKIT_KEY, LIVEKIT_SECRET); the SFU binary wants a single
+# "key: secret" string, so the entrypoint composes it via --keys. Verified
+# against livekit-server:v1.13.6 (a throwaway pod started the server with
+# exactly this command and no "could not parse config").
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: livekit
+  namespace: livekit
+  labels:
+    app.kubernetes.io/name: livekit
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: livekit
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: livekit
+    spec:
+      # Pin to the media node (hostNetwork + single UDP port: only one copy).
+      nodeSelector:
+        kubernetes.io/hostname: worker-01
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      containers:
+        - name: livekit
+          image: livekit/livekit-server:v1.13.6
+          imagePullPolicy: IfNotPresent
+          # Compose the single "key: secret" the SFU expects from the two
+          # 1Password-sourced envs. (The binary has no LIVEKIT_KEY_FILE env;
+          # --keys is the env-friendly credential path.) The 3rd arg holds a
+          # "key: secret" pair, so it is quoted (an unquoted ": " would parse
+          # as a nested YAML map and fail apiserver validation).
+          command:
+            - /bin/sh
+            - -c
+            - '/livekit-server --config /etc/livekit/livekit.yaml --keys "$LIVEKIT_KEY: $LIVEKIT_SECRET"'
+          env:
+            - name: LIVEKIT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: livekit-credentials
+                  key: LIVEKIT_KEY
+            - name: LIVEKIT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: livekit-credentials
+                  key: LIVEKIT_SECRET
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 7880
+              protocol: TCP
+            - name: tcp
+              containerPort: 7881
+              protocol: TCP
+            - name: udp
+              containerPort: 50100
+              protocol: UDP
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 7880
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 7880
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            limits:
+              memory: 4Gi
+            requests:
+              memory: 1Gi
+              cpu: "1"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/livekit
+      volumes:
+        - name: config
+          configMap:
+            name: livekit-config

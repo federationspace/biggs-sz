@@ -1,0 +1,19 @@
+---
+# Signaling / WebSocket endpoint (HTTP + WS) for LiveKit. Reached by clients via
+# the wildcard-gregbob-net gateway (livekit-route.yaml -> livekit-service:7880).
+# Media does NOT use this Service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: livekit-service
+  namespace: livekit
+  labels:
+    app.kubernetes.io/name: livekit
+spec:
+  selector:
+    app.kubernetes.io/name: livekit
+  ports:
+    - name: http
+      port: 7880
+      protocol: TCP
+      targetPort: 7880
