@@ -90,6 +90,17 @@ For replicated workloads (CNPG replicas, Valkey cluster members) that is fine;
 delete the PVC and let the operator rebuild the member. For anything that is a
 sole copy, back it up first or move it to `ceph-block`.
 
+**Pins that live outside the cluster.** Some workloads are tied to a node by an
+IP written into the router, which no `grep` of `clusters/` will find:
+
+| What | Node | Where it lives |
+| --- | --- | --- |
+| LiveKit media: UDM forwards UDP `50100` + TCP `7881` | worker-01 `192.168.2.117` | UniFi Network → Settings → Port Forwarding |
+
+If the node holding one of these is replaced, repoint the forward in the same
+change. Leaving it stale fails in a way that hides: the LAN path still works, so
+the service looks healthy, and only remote users see it broken.
+
 ---
 
 ## 3. Retire the old node
