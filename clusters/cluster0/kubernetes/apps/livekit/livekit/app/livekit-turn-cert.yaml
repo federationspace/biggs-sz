@@ -1,0 +1,60 @@
+---
+# TLS certificate for coturn's turns: listener (turn.gregbob.net:5349).
+#
+# Why a dedicated cert instead of the network/ wildcard: the
+# wildcard-gregbob-net secret lives in network/ attached to the shared
+# Gateway; coturn runs in livekit/ and needs the key material mounted
+# where it runs. cert-manager Certificates are namespace-scoped, so this
+# mints a copy in livekit/. DNS-01 via letsencrypt-prod (Cloudflare API
+# token) — HTTP-01 cannot work for a host that is DNS-only (its 443 is
+# not the Cloudflare origin path).
+#
+# PREREQUISITE (manual, Cloudflare): the turn.gregbob.net record must
+# exist and be DNS-ONLY (grey cloud), NOT proxied. The Cloudflare proxy
+# does not pass non-HTTP TLS ports such as 5349; today the name resolves
+# to Cloudflare edge IPs (188.114.96.x), which would blackhole clients.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: turn-gregbob-net
+  namespace: livekit
+  labels:
+    app.kubernetes.io/name: coturn
+spec:
+  secretName: turn-gregbob-net-tls
+  dnsNames:
+    - turn.gregbob.net
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+---
+# Shared TURN REST-auth secret (HMAC key for the "static auth secret"
+# mechanism). One secret, two consumers:
+#   - livekit-server: rtc.turn_servers[].secret_file -> derives
+#     username "<expiry>:<participantID>" / password base64(HMAC-SHA1(
+#     secret, username)) and hands both to clients on join
+#   - coturn: use-auth-secret with static-auth-secret -> verifies the
+#     same HMAC
+#
+# Per the repo's golden rules: no credentials in Git. PREREQUISITE:
+# create 1Password item "livekit-turn" (vault per ClusterSecretStore
+# onepassword-connect) with field TURN_SECRET (e.g. openssl rand -hex 32).
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: livekit-turn-secret
+  namespace: livekit
+  labels:
+    app.kubernetes.io/name: coturn
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: onepassword-connect
+  target:
+    name: livekit-turn-secret
+  data:
+    - secretKey: TURN_SECRET
+      remoteRef:
+        key: livekit-turn
+        property: TURN_SECRET

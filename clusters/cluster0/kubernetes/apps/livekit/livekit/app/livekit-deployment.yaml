@@ -108,7 +108,18 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /etc/livekit
+            # TURN REST-auth secret (see rtc.turn_servers.secret_file in
+            # livekit-configmap.yaml). Shared with coturn — both sides must
+            # derive the same HMAC credentials. defaultMode 0400: livekit
+            # refuses a secret file with any "others" mode bits set.
+            - name: turn-secret
+              mountPath: /etc/livekit-turn
+              readOnly: true
       volumes:
         - name: config
           configMap:
             name: livekit-config
+        - name: turn-secret
+          secret:
+            secretName: livekit-turn-secret
+            defaultMode: 0400

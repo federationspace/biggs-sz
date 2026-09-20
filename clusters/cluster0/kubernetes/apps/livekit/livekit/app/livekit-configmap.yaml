@@ -70,3 +70,39 @@ data:
       ips:
         includes:
           - 192.168.2.0/24
+      # ---- External TURN/TLS relay for remote (cross-site) clients ----
+      # Root cause this addresses (2026-09-20 cross-site failure): with
+      # use_external_ip + advertise_internal_ip the SFU advertises BOTH the
+      # WAN and the LAN IP as host candidates. Remote peers validate pairs
+      # against both (the single 0.0.0.0:50100 UDPMux receives checks for
+      # either address after the UDM DNAT), pion ICE-Lite accepts every
+      # aggressive-nomination switch, and legacy Edge / clientProtocol-1
+      # clients flap the publisher transport indefinitely: 31 pair
+      # switches in 104s, zero tracks published. A TURN relay candidate
+      # gives those clients one stable, unambiguous path.
+      #
+      # WHY EXTERNAL (coturn), NOT the SFU's embedded `turn:` block:
+      # livekit-server v1.13.7 hardcodes the embedded TURN/TLS URL to
+      # `turns:<domain>:443?transport=tcp` (pkg/service/roommanager.go,
+      # iceServersForParticipant) regardless of turn.tls_port — and WAN
+      # TCP 443 on this single IP is the Cloudflare -> wildcard-gregbob-net
+      # origin path serving all of gregbob.net. rtc.turn_servers builds
+      # URLs with an explicit port, so it is the only workable shape here.
+      #
+      # Credentials: `secret_file` (NOT `secret:`) keeps the value out of
+      # this ConfigMap; livekit derives REST-style credentials per join —
+      # username "<expiry>:<participantID>", password base64(HMAC-SHA1(
+      # secret, username)) — exactly what coturn `use-auth-secret` +
+      # `static-auth-secret` verifies. TTL 14400s = livekit's
+      # external-TURN default (clamped to [300, TURNMaxTTLSeconds] at
+      # load). The SAME secret must be configured on coturn (see
+      # coturn-deployment.yaml; it consumes the livekit-turn-secret
+      # Secret via env + entrypoint expansion). livekit-server requires
+      # the secret file to have no "others" mode bits — the volume sets
+      # defaultMode 0400 — and trims whitespace/newlines from contents.
+      turn_servers:
+        - host: turn.gregbob.net
+          port: 5349
+          protocol: tls
+          secret_file: /etc/livekit-turn/TURN_SECRET
+          ttl: 14400
