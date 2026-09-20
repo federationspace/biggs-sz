@@ -80,8 +80,11 @@ spec:
             - --cert=/etc/coturn/tls.crt
             - --pkey=/etc/coturn/tls.key
             - --no-cli
-            - --no-tlsv1
-            - --no-tlsv1_1
+            # TLS floor: coturn defaults already disable TLSv1.0/1.1
+            # (enable_tlsv1/enable_tlsv1_1 default false in 4.7.0); no
+            # flags needed. Do not add --no-tlsv1/--no-tlsv1_1 — not
+            # valid option names (there is --no-tlsv1_2, different
+            # meaning: raise the floor to 1.3).
             - --simple-log
             # With use-auth-secret the runtime secret comes from the flag,
             # but coturn still opens its userdb; point it at writable tmp
