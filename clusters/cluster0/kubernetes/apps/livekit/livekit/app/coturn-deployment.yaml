@@ -1,0 +1,144 @@
+---
+# coturn — external TURN/TLS relay for cross-site LiveKit calls.
+#
+# Why external instead of livekit-server's embedded `turn:` block:
+# livekit-server v1.13.7 hardcodes the client-facing URL for embedded
+# TURN/TLS to turns:<domain>:443 regardless of turn.tls_port
+# (pkg/service/roommanager.go, iceServersForParticipant). WAN TCP 443 on
+# this single IP is the Cloudflare -> wildcard-gregbob-net origin path
+# for all of gregbob.net, so port 443 is unavailable. rtc.turn_servers
+# (external TURN) builds URLs with an explicit port — the only workable
+# shape on this network. See livekit-configmap.yaml turn_servers.
+#
+# Why hostNetwork on worker-01: relay ports must egress with a
+# source-address the remote peer's NAT maps back (no double SNAT), and
+# the UDM port-forwards TCP/UDP 5349 + UDP 50101-50200 to 192.168.2.117
+# by IP. Same pattern and same node as the SFU (one media box).
+# replicas: 1 + Recreate; a second copy would collide on 5349.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coturn
+  namespace: livekit
+  labels:
+    app.kubernetes.io/name: coturn
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: coturn
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: coturn
+    spec:
+      # Same node as the SFU (UDM forwards hit 192.168.2.117 by IP).
+      nodeSelector:
+        kubernetes.io/hostname: worker-01
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      containers:
+        - name: coturn
+          image: coturn/coturn:4.7.0
+          imagePullPolicy: IfNotPresent
+          # Flags (coturn 4.7.0; see livekit-configmap.yaml for the SFU
+          # side that must stay in sync):
+          #   5349 tcp+tls listener (443 is the Cloudflare origin path);
+          #   5350 alt TLS for picky middleboxes (also forwarded on UDM);
+          #   listening/relay-ip pinned to the node LAN address;
+          #   external-ip maps it to the WAN IP the UDM NATs from;
+          #   relay range 50101-50200 = SFU-adjacent, verified free;
+          #   use-auth-secret + static-auth-secret = REST-auth HMAC, the
+          #     same secret livekit mounts to DERIVE credentials;
+          #   cert/pkey = cert-manager turn-gregbob-net-tls;
+          #   no-cli (no localhost telnet admin), no TLS<1.2.
+          # Secret injection: the image entrypoint eval-expands each arg,
+          # so $TURN_SECRET (env from the livekit-turn-secret Secret) is
+          # substituted at container start. Single-quoted here so the
+          # apiserver does NOT expand it; the entrypoint does.
+          args:
+            - --listening-port=5349
+            - --tls-listening-port=5349
+            - --alt-tls-listening-port=5350
+            - --listening-ip=192.168.2.117
+            - --relay-ip=192.168.2.117
+            - --external-ip=69.61.172.135/192.168.2.117
+            - --min-port=50101
+            - --max-port=50200
+            - --fingerprint
+            - --use-auth-secret
+            - '--static-auth-secret=$TURN_SECRET'
+            - --no-multicast-peers
+            - --realm=gregbob.net
+            - --cert=/etc/coturn/tls.crt
+            - --pkey=/etc/coturn/tls.key
+            - --no-cli
+            - --no-tlsv1
+            - --no-tlsv1_1
+            - --simple-log
+            # With use-auth-secret the runtime secret comes from the flag,
+            # but coturn still opens its userdb; point it at writable tmp
+            # (readOnlyRootFilesystem) so startup logs stay clean.
+            - --db=/tmp/turndb
+          env:
+            - name: TURN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: livekit-turn-secret
+                  key: TURN_SECRET
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - NET_BIND_SERVICE
+          ports:
+            - name: turn-tls
+              containerPort: 5349
+              protocol: TCP
+            - name: turn-tls-alt
+              containerPort: 5350
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: 5349
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 5349
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            limits:
+              memory: 512Mi
+            requests:
+              memory: 128Mi
+              cpu: 50m
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: turn-tls
+              mountPath: /etc/coturn/tls.crt
+              subPath: tls.crt
+              readOnly: true
+            - name: turn-tls
+              mountPath: /etc/coturn/tls.key
+              subPath: tls.key
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: turn-tls
+          secret:
+            secretName: turn-gregbob-net-tls
+            defaultMode: 0400
