@@ -33,7 +33,7 @@ spec:
                     values:
                       - worker-01
       containers:
-        - image: ghcr.io/continuwuity/continuwuity:main@sha256:14e80e1b79c3a89f4999fb75102054fe956494889838d9ba7d18b948a43a1ae9
+        - image: ghcr.io/continuwuity/continuwuity:main@sha256:d770d2816343a5d95cc255e01e9f4a354c0c7cef27c58784e69c59ce24fa2ca9
           imagePullPolicy: Always
           name: continuwuity
           env:
