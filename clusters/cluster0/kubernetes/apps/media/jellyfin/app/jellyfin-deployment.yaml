@@ -20,7 +20,17 @@ spec:
         kubernetes.io/hostname: worker-02
       containers:
         - name: jellyfin
-          image: jellyfin/jellyfin:latest
+          # Pinned deliberately, and the pin is what puts jellyfin under
+          # Renovate at all: Renovate cannot parse a version out of `:latest`,
+          # so with that tag it proposed nothing and upgrades instead arrived
+          # silently on any pod restart (imagePullPolicy is Always and this
+          # pod OOM-restarts often against its 4Gi limit). That is how
+          # Jellyfin 12 landed unreviewed, dropping the legacy
+          # X-Emby-Authorization header that Ombi still sends and breaking
+          # login for every Jellyfin-linked Ombi user plus the content sync
+          # (Ombi-app/Ombi#5478, still open upstream). Keep this pinned so
+          # upgrades stay opt-in via a reviewable Renovate PR.
+          image: jellyfin/jellyfin:12.1
           imagePullPolicy: Always
           ports:
             - containerPort: 8096

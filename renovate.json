@@ -114,6 +114,13 @@
       "matchFileNames": ["clusters/**/media/**"],
       "matchUpdateTypes": ["patch"],
       "automerge": true
+    },
+    {
+      "description": "Jellyfin upgrades break the Ombi integration (Ombi-app/Ombi#5478); guard against the media-apps patch automerge above so every jellyfin bump stays a reviewed, opt-in PR",
+      "matchManagers": ["kubernetes"],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["jellyfin/jellyfin"],
+      "automerge": false
     }
   ]
 }
