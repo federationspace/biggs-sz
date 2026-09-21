@@ -46,7 +46,7 @@ spec:
       enableServiceLinks: false
       containers:
         - name: coturn
-          image: coturn/coturn:4.7.0
+          image: coturn/coturn:4.18.0
           imagePullPolicy: IfNotPresent
           # Flags (coturn 4.7.0; see livekit-configmap.yaml for the SFU
           # side that must stay in sync):
