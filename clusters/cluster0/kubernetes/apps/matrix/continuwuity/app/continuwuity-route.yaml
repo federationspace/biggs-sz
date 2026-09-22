@@ -25,3 +25,14 @@ spec:
       backendRefs:
         - name: continuwuity-service
           port: 8080
+    # Catch-all, listed last so the prefixes above keep priority. Continuwuity
+    # serves its own landing page and /.well-known/matrix/* on the host, so
+    # without this the gateway answers "route not found" for anything outside
+    # /_matrix and /_continuwuity/.
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: continuwuity-service
+          port: 8080
