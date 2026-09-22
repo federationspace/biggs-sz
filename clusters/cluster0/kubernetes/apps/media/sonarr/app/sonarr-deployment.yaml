@@ -14,7 +14,13 @@ spec:
       nodeSelector:
         kubernetes.io/hostname: control-00
       containers:
-        - image: lscr.io/linuxserver/sonarr:latest
+        # Pinned so upgrades are opt-in, and the pin is what puts sonarr under
+        # Renovate at all: Renovate cannot parse a version out of `:latest`, so
+        # with that tag it proposed nothing and new builds instead arrived
+        # silently on any pod restart (imagePullPolicy is Always). Use the full
+        # X.Y.Z.BUILD-lsNNN build tag; the bare 4.0.20 alias is republished on
+        # every build of that minor, so it floats.
+        - image: lscr.io/linuxserver/sonarr:4.0.20.3014-ls325
           imagePullPolicy: Always
           name: sonarr
           env:
