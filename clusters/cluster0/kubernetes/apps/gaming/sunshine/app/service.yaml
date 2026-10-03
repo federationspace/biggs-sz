@@ -1,0 +1,20 @@
+---
+# Sunshine (Moonlight game-stream host) runs OUTSIDE the cluster, as a Flatpak
+# user service on the Bazzite gaming PC `baszite` (192.168.2.56). This
+# selector-less Service plus the hand-written EndpointSlice next to it give the
+# Gateway an in-cluster backend that points at that host.
+#
+# Only the admin web UI (HTTPS, 47990) is proxied. The game stream itself
+# (TCP 47984/47989/48010, UDP 47998-48000) is NOT HTTP and must not hairpin
+# through the cluster: Moonlight clients connect to 192.168.2.56 directly.
+apiVersion: v1
+kind: Service
+metadata:
+  name: sunshine
+spec:
+  type: ClusterIP
+  ports:
+    - name: https
+      port: 47990
+      targetPort: 47990
+      protocol: TCP

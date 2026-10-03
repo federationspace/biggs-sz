@@ -1,0 +1,22 @@
+---
+# Manual endpoint for the selector-less `sunshine` Service. The IP must match
+# the gaming PC's DHCP reservation on the UDM; if the host moves, update it here.
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: sunshine-baszite
+  labels:
+    kubernetes.io/service-name: sunshine
+    # Any value other than endpointslice-controller.k8s.io keeps the built-in
+    # EndpointSlice controller from adopting or deleting this object.
+    endpointslice.kubernetes.io/managed-by: flux
+addressType: IPv4
+ports:
+  - name: https
+    port: 47990
+    protocol: TCP
+endpoints:
+  - addresses:
+      - 192.168.2.56
+    conditions:
+      ready: true

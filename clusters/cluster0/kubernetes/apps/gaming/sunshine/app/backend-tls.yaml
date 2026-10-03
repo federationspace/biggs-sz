@@ -1,0 +1,58 @@
+---
+# Sunshine serves its web UI over HTTPS with a self-signed certificate
+# (CN "Sunshine Gamestream Host", RSA 2048, no SAN, valid until 2046). It is a
+# public certificate, not a secret, so it lives in a ConfigMap.
+#
+# Pinned to the exact cert: SHA256 fingerprint
+#   97:51:C8:99:E4:70:18:7A:FB:21:02:08:A6:C4:6F:70:A0:9C:43:B6:73:C3:BD:6E:C1:23:60:7D:7A:98:E6:E5
+# Source on the host:
+#   ~/.var/app/dev.lizardbyte.app.Sunshine/config/sunshine/credentials/cacert.pem
+# If Sunshine regenerates its credentials (reinstall, wiped config), the
+# gateway will return 503 for sunshine.gregbob.net until this is refreshed.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sunshine-ca
+data:
+  ca.crt: |
+    -----BEGIN CERTIFICATE-----
+    MIIC0jCCAbqgAwIBAgIUO6p66JzBBvlWuEYQAufPMOxdtR0wDQYJKoZIhvcNAQEL
+    BQAwIzEhMB8GA1UEAwwYU3Vuc2hpbmUgR2FtZXN0cmVhbSBIb3N0MB4XDTI2MTAw
+    MjE5MjQwMFoXDTQ2MDkyNzE5MjQwMFowIzEhMB8GA1UEAwwYU3Vuc2hpbmUgR2Ft
+    ZXN0cmVhbSBIb3N0MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlbHn
+    gJ7LWukIl9spLod8mAzuSi6he0Wh3A1NlZY7fLrJuhj6G2GsiTd4s7f96JFB5GK/
+    D9ka3H0svTXea1rUHXU2HOWmASWOQ30TCaJaGYhPCy5qWS/064zcUnFdrVhr70Rf
+    BcD5RHiMaELm0ReyvX5gdPHvfvzoDbtYNpF7LkmfLWmJvs2bSIw/0HQGVunzkclp
+    bMukmXN3SBoo/4cpkCeIuryVE9wMp7GrcgVyKinpK+64PWNX1k4d9aU8YnL8cuLq
+    RZXINQRU0LK7L92aj9tGF3rPdkyQOWHEHxgg1uIaZ/mTqTr0f4KMXNLAg5xtbUMy
+    u+rCmlGRScpFfDXMjQIDAQABMA0GCSqGSIb3DQEBCwUAA4IBAQBxqTFbsTcmnv/y
+    /ZSBmW7qSyQevXwptFqcsV55thro/jr4M4i7eiRJj4R6j0gYOA4XNOMISZy5ttNX
+    5CPT7Vwg2Z/uu+nknCV5SWib1j3OSKPCjixNhfbPr9/TjhgzvGI9ac75FwUAM2rH
+    ovBV4yafq3YL+ZGqbPvNbcWpXBAV+O58cnIHi2h2Ebr82h68sKpCvMif1UvpDtVw
+    fRi7g4nqZLz2dpkaIuDeUfKZKxpAeyWXK77nlsj3x1G6QY0z7+bygOID4Ap+6MIJ
+    /nqcxlZ7mKO/vltQi+ceXI/7rWC1aNozhhTefFwEG330+Z5isRoSDgXUBdFxeMXn
+    8Fh88wQH
+    -----END CERTIFICATE-----
+---
+# Originate TLS from the gateway to Sunshine and trust ONLY the pinned cert
+# above. insecureSkipVerify: Hostname keeps chain verification (against
+# sunshine-ca) but skips the hostname/SAN check, because the cert carries no
+# SAN and its CN is not a hostname. The standard BackendTLSPolicy cannot do
+# this: it always verifies the hostname.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: sunshine-backend-tls
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: sunshine
+  backend:
+    tls:
+      caCertificateRefs:
+        - name: sunshine-ca
+      insecureSkipVerify: Hostname
+      # Sunshine's web server (Simple-Web-Server) speaks HTTP/1.1 only.
+      alpnProtocols:
+        - http/1.1

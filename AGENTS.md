@@ -76,7 +76,8 @@ kubernetes/apps/<ns>/<app>/
   MetalLB HelmRepository source and a live `metallb-system` namespace still
   exist; both are legacy and unused.
   Assigned VIPs: `.7` k8s-gateway, `.8` lan-dns, `.9`
-  wildcard-gregbob-net Gateway.
+  wildcard-gregbob-net Gateway, `.10` livekit-media-service, `.11`
+  internal-gregbob-net Gateway.
 - **Ingress lives in `network/`**: `agentgateway` (the Gateway API
   implementation, Gateway `wildcard-gregbob-net`), `k8s-gateway` (DNS
   authority for the `gregbob.net` zone), `lan-dns` (CoreDNS LAN resolver).
@@ -87,6 +88,18 @@ kubernetes/apps/<ns>/<app>/
 - **HTTPRoute convention**: `parentRefs` names `wildcard-gregbob-net` in
   namespace `network` **by name only**, no `sectionName`. The Gateway's
   listeners allow routes from all namespaces.
+- **LAN-only routes**: admin UIs that must never be internet-reachable attach
+  to the second Gateway, `internal-gregbob-net` (VIP `192.168.2.11`, HTTPS
+  only, same wildcard cert). It is not port-forwarded, so it is reachable only
+  from the LAN and over WireGuard; k8s-gateway answers those hostnames with
+  `.11`, while public DNS still points at Cloudflare, which only reaches the
+  public Gateway (where the hostname has no route and returns 404).
+- **Hosts outside the cluster** (e.g. the Bazzite gaming PC `baszite`,
+  `192.168.2.56`, in `gaming/sunshine`) are exposed with a selector-less
+  Service plus a hand-written EndpointSlice labelled
+  `endpointslice.kubernetes.io/managed-by: flux`. For self-signed HTTPS
+  backends, pin the cert with an `AgentgatewayPolicy` `backend.tls`
+  (`caCertificateRefs` + `insecureSkipVerify: Hostname`), not `All`.
 - **Remote access** is a WireGuard VPN on the UDM, not an in-cluster
   component. NetBird was removed (2026-09-13); a `wireguard` namespace and a
   `wireguard` HelmRepository source survive as legacy with no manifests
