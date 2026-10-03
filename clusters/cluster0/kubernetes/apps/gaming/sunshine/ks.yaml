@@ -1,0 +1,23 @@
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app sunshine
+  namespace: flux-system
+spec:
+  targetNamespace: gaming
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  path: ./clusters/cluster0/kubernetes/apps/gaming/sunshine/app/
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: false
+  interval: 3m
+  retryInterval: 1m
+  timeout: 2m
+  # The HTTPRoute attaches to the LAN-only Gateway defined by agentgateway.
+  dependsOn:
+    - name: agentgateway

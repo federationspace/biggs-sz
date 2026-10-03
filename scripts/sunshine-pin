@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# sunshine-pin: approve Moonlight pairing requests on the Sunshine host from the CLI.
+#
+# Uses Sunshine's admin REST API (v2026.914+): GET/POST/DELETE /api/pin.
+# Non-browser clients send no Origin/Referer header, so Sunshine exempts them
+# from CSRF tokens; HTTP basic auth with the admin login is all that's needed.
+#
+# Usage:
+#   sunshine-pin                 list pending pairing requests
+#   sunshine-pin 1234 [NAME]     submit the PIN Moonlight shows (auto-selects the
+#                                request when exactly one is pending)
+#   sunshine-pin 1234 NAME ID    submit the PIN for a specific pending request
+#   sunshine-pin cancel ID       reject a pending request
+#   sunshine-pin clients         list paired clients
+#
+# Environment:
+#   SUNSHINE_URL   default https://sunshine.gregbob.net (LAN/WireGuard only).
+#                  Direct: SUNSHINE_URL=https://192.168.2.56:47990 SUNSHINE_INSECURE=1
+#   SUNSHINE_USER  admin username (default: sunshine)
+#   SUNSHINE_PASS  admin password; otherwise read from ~/.netrc, else prompted
+#   SUNSHINE_INSECURE=1  skip TLS verification (needed for the direct IP:
+#                        Sunshine's own cert is self-signed)
+set -euo pipefail
+
+URL="${SUNSHINE_URL:-https://sunshine.gregbob.net}"
+URL="${URL%/}"
+USER_NAME="${SUNSHINE_USER:-sunshine}"
+host="${URL#https://}"; host="${host%%[:/]*}"
+
+curl_opts=(-sS --connect-timeout 5 --max-time 150)
+[[ "${SUNSHINE_INSECURE:-0}" == 1 ]] && curl_opts+=(-k)
+
+auth=()
+load_auth() {
+  ((${#auth[@]})) && return
+  if [[ -n "${SUNSHINE_PASS:-}" ]]; then
+    auth=(-u "$USER_NAME:$SUNSHINE_PASS")
+  elif [[ -f "$HOME/.netrc" ]] && grep -qE "machine[[:space:]]+$host([[:space:]]|$)" "$HOME/.netrc"; then
+    auth=(--netrc)
+  else
+    read -rsp "Sunshine password for $USER_NAME@$host: " SUNSHINE_PASS </dev/tty; echo >&2
+    auth=(-u "$USER_NAME:$SUNSHINE_PASS")
+  fi
+}
+
+api() { # api METHOD PATH [JSON]; prints the JSON body, exits non-zero on HTTP errors
+  local method=$1 path=$2 body=${3:-} out code
+  load_auth
+  local args=("${curl_opts[@]}" "${auth[@]}" -w '\n%{http_code}' -X "$method" "$URL$path")
+  [[ -n "$body" ]] && args+=(-H 'Content-Type: application/json' --data "$body")
+  out=$(curl "${args[@]}" 2>/dev/null) || true
+  code=${out##*$'\n'}; out=${out%$'\n'*}
+  case "$code" in
+    2??) printf '%s\n' "$out" ;;
+    401) echo "Sunshine rejected the login (HTTP 401): check SUNSHINE_USER / SUNSHINE_PASS." >&2; exit 1 ;;
+    403) echo "Sunshine refused this client address (HTTP 403): origin_web_ui_allowed." >&2; exit 1 ;;
+    000) echo "Could not reach $URL (connection or TLS failure; off-LAN, or a self-signed cert without SUNSHINE_INSECURE=1)." >&2; exit 1 ;;
+    *)   echo "Sunshine returned HTTP $code: $out" >&2; exit 1 ;;
+  esac
+}
+
+pending() { api GET /api/pin; }
+
+case "${1:-list}" in
+  list|ls)
+    reqs=$(pending)
+    jq -r '
+      if (.pairings | length) == 0 then "No pending pairing requests. Start pairing in Moonlight first."
+      else (.pairings[] | "\(.id)  \(.name // "-")  \(.address // "-")") end' <<<"$reqs"
+    ;;
+  clients)
+    out=$(api GET /api/clients/list)
+    jq -r '.named_certs[]? | "\(.uuid)  \(.name)  enabled=\(.enabled)"' <<<"$out"
+    ;;
+  cancel)
+    id=${2:?usage: sunshine-pin cancel PAIRING_ID}
+    out=$(api DELETE /api/pin "$(jq -nc --arg id "$id" '{pairing_id:$id}')")
+    jq -r '.status' <<<"$out"
+    ;;
+  [0-9][0-9][0-9][0-9])
+    pin=$1 name=${2:-} id=${3:-}
+    if [[ -z "$id" ]]; then
+      reqs=$(pending)
+      n=$(jq '.pairings | length' <<<"$reqs")
+      if [[ "$n" == 0 ]]; then
+        echo "No pending pairing requests. Start pairing in Moonlight first." >&2; exit 1
+      elif [[ "$n" != 1 ]]; then
+        echo "$n requests pending; pass the ID as the third argument:" >&2
+        jq -r '.pairings[] | "  \(.id)  \(.name // "-")  \(.address // "-")"' <<<"$reqs" >&2; exit 1
+      fi
+      id=$(jq -r '.pairings[0].id' <<<"$reqs")
+      [[ -z "$name" ]] && name=$(jq -r '.pairings[0].name // empty' <<<"$reqs")
+    fi
+    name=${name:-moonlight}
+    echo "Pairing '$name' ($id) with PIN $pin; waiting for Moonlight to finish the handshake..." >&2
+    out=$(api POST /api/pin "$(jq -nc --arg id "$id" --arg pin "$pin" --arg name "$name" \
+      '{pairing_id:$id, pin:$pin, name:$name}')")
+    status=$(jq -r '.status' <<<"$out")
+    if [[ "$status" == true ]]; then echo "Paired."; else echo "Pairing failed (wrong PIN, cancelled, or timed out)." >&2; exit 1; fi
+    ;;
+  -h|--help|help)
+    sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+    ;;
+  *)
+    echo "Unknown argument: $1 (try --help)" >&2; exit 2
+    ;;
+esac

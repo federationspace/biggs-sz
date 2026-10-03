@@ -45,3 +45,37 @@ spec:
       certificateRefs:
       - kind: Secret
         name: wildcard-gregbob-net
+---
+# LAN-only Gateway for admin UIs that must never be internet-reachable (first
+# user: gaming/sunshine). Same wildcard cert, but its own agentgateway proxy
+# and its own VIP, 192.168.2.11. The router port-forwards 80/443 to the PUBLIC
+# Gateway's VIP (192.168.2.9) only, so nothing outside the LAN or the WireGuard
+# VPN can reach this one. k8s-gateway answers *.gregbob.net names whose
+# HTTPRoutes attach here with 192.168.2.11.
+#
+# The VIP is pinned with the Cilium LB-IPAM annotation (never
+# spec.loadBalancerIP); agentgateway copies infrastructure.annotations onto the
+# generated LoadBalancer Service.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: internal-gregbob-net
+  namespace: network
+spec:
+  gatewayClassName: agentgateway
+  infrastructure:
+    annotations:
+      io.cilium/lb-ipam-ips: "192.168.2.11"
+  listeners:
+  - hostname: "*.gregbob.net"
+    name: internal-gregbob-net-https
+    port: 443
+    protocol: HTTPS
+    allowedRoutes:
+      namespaces:
+        from: All
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - kind: Secret
+        name: wildcard-gregbob-net
