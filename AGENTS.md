@@ -63,8 +63,10 @@ kubernetes/apps/<ns>/<app>/
 - The control plane hosts media pods on purpose: downloads stage on the
   node's local SSD, then move to the ZFS pool locally instead of over the
   1Gbps network. Most `*arr` apps and `sabnzbd` pin to `control-00`;
-  `jellyfin` pins to `worker-01` and `plex` to `worker-00` for Intel iGPU
-  hardware transcoding; `continuwuity` pins to `worker-01`.
+  `jellyfin` pins to `worker-02` (Lunar Lake iGPU, `xe` driver, requests
+  `gpu.intel.com/xe`) and `plex` to `worker-01` (Raptor Lake iGPU, `i915`
+  driver, requests `gpu.intel.com/i915`) for hardware transcoding;
+  `continuwuity` pins to `worker-01`.
 - **StorageClasses**: `local-path` (k3s built-in, **default**, node-local SSD),
   `ceph-block` (Rook-Ceph RBD, replicated, node-independent),
   `nfs-storage` (`provisioner: nfs`, shared media volumes from the NAS).
