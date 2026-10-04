@@ -38,6 +38,16 @@ spec:
       nodeSelector:
         kubernetes.io/hostname: worker-01
       securityContext:
+        # The image runs as nobody (65534). Pin it, and give the pod that
+        # group so the kubelet chgrps the TLS secret volume to 65534; with
+        # defaultMode 0440 below coturn can then read its cert and key.
+        # Without this the files are root:root 0400, coturn logs "cannot
+        # find certificate file", and silently runs WITHOUT the TLS listener
+        # on 5349 (plain TCP still binds, so the readiness probe passes).
+        runAsUser: 65534
+        runAsGroup: 65534
+        runAsNonRoot: true
+        fsGroup: 65534
         seccompProfile:
           type: RuntimeDefault
       hostNetwork: true
@@ -57,7 +67,9 @@ spec:
           #   relay range 50101-50200 = SFU-adjacent, verified free;
           #   use-auth-secret + static-auth-secret = REST-auth HMAC, the
           #     same secret livekit mounts to DERIVE credentials;
-          #   cert/pkey = cert-manager turn-gregbob-net-tls;
+          #   cert/pkey = cert-manager turn-gregbob-net-tls, mounted as a
+          #     directory (not subPath) so renewals propagate without a
+          #     pod restart being the only path;
           #   no-cli (no localhost telnet admin), no TLS<1.2.
           # Secret injection: the image entrypoint eval-expands each arg,
           # so $TURN_SECRET (env from the livekit-turn-secret Secret) is
@@ -77,8 +89,8 @@ spec:
             - '--static-auth-secret=$TURN_SECRET'
             - --no-multicast-peers
             - --realm=gregbob.net
-            - --cert=/etc/coturn/tls.crt
-            - --pkey=/etc/coturn/tls.key
+            - --cert=/etc/coturn/tls/tls.crt
+            - --pkey=/etc/coturn/tls/tls.key
             - --no-cli
             # TLS floor: coturn defaults already disable TLSv1.0/1.1
             # (enable_tlsv1/enable_tlsv1_1 default false in 4.7.0); no
@@ -131,12 +143,7 @@ spec:
             - name: tmp
               mountPath: /tmp
             - name: turn-tls
-              mountPath: /etc/coturn/tls.crt
-              subPath: tls.crt
-              readOnly: true
-            - name: turn-tls
-              mountPath: /etc/coturn/tls.key
-              subPath: tls.key
+              mountPath: /etc/coturn/tls
               readOnly: true
       volumes:
         - name: tmp
@@ -144,4 +151,6 @@ spec:
         - name: turn-tls
           secret:
             secretName: turn-gregbob-net-tls
-            defaultMode: 0400
+            # 0440 + pod fsGroup 65534: group-readable by coturn (nobody),
+            # still not world-readable. 0400 left it root-only.
+            defaultMode: 0440
