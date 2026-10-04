@@ -61,7 +61,11 @@ spec:
           # Flags (coturn 4.7.0; see livekit-configmap.yaml for the SFU
           # side that must stay in sync):
           #   5349 tcp+tls listener (443 is the Cloudflare origin path);
-          #   5350 alt TLS for picky middleboxes (also forwarded on UDM);
+          #   NO alt port: coturn only opens the alt (5350) listener for
+          #     RFC5780 NAT discovery, which needs a second listener IP and
+          #     is off by default since 4.x. A --alt-tls-listening-port flag
+          #     here was inert (nothing ever bound 5350), and LiveKit only
+          #     advertises 5349 anyway;
           #   listening/relay-ip pinned to the node LAN address;
           #   external-ip maps it to the WAN IP the UDM NATs from;
           #   relay range 50101-50200 = SFU-adjacent, verified free;
@@ -70,7 +74,9 @@ spec:
           #   cert/pkey = cert-manager turn-gregbob-net-tls, mounted as a
           #     directory (not subPath) so renewals propagate without a
           #     pod restart being the only path;
-          #   no-cli (no localhost telnet admin), no TLS<1.2.
+          #   CLI (localhost telnet admin) is off by default; --no-cli is
+          #     deprecated and logs an ERROR line at startup, so it is gone;
+          #   TLS<1.2 is off by default.
           # Secret injection: the image entrypoint eval-expands each arg,
           # so $TURN_SECRET (env from the livekit-turn-secret Secret) is
           # substituted at container start. Single-quoted here so the
@@ -78,7 +84,6 @@ spec:
           args:
             - --listening-port=5349
             - --tls-listening-port=5349
-            - --alt-tls-listening-port=5350
             - --listening-ip=192.168.2.117
             - --relay-ip=192.168.2.117
             - --external-ip=69.61.172.135/192.168.2.117
@@ -91,13 +96,15 @@ spec:
             - --realm=gregbob.net
             - --cert=/etc/coturn/tls/tls.crt
             - --pkey=/etc/coturn/tls/tls.key
-            - --no-cli
             # TLS floor: coturn defaults already disable TLSv1.0/1.1
             # (enable_tlsv1/enable_tlsv1_1 default false in 4.7.0); no
             # flags needed. Do not add --no-tlsv1/--no-tlsv1_1 — not
             # valid option names (there is --no-tlsv1_2, different
             # meaning: raise the floor to 1.3).
-            - --simple-log
+            # Log to the container's stdout so `kubectl logs` works. Without
+            # this coturn writes /tmp/turn.log once /tmp is writable (the
+            # fsGroup in #225 made it so) and kubectl logs goes silent.
+            - --log-file=stdout
             # With use-auth-secret the runtime secret comes from the flag,
             # but coturn still opens its userdb; point it at writable tmp
             # (readOnlyRootFilesystem) so startup logs stay clean.
@@ -119,9 +126,6 @@ spec:
           ports:
             - name: turn-tls
               containerPort: 5349
-              protocol: TCP
-            - name: turn-tls-alt
-              containerPort: 5350
               protocol: TCP
           readinessProbe:
             tcpSocket:
