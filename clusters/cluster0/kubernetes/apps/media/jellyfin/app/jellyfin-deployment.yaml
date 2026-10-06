@@ -30,7 +30,7 @@ spec:
           # login for every Jellyfin-linked Ombi user plus the content sync
           # (Ombi-app/Ombi#5478, still open upstream). Keep this pinned so
           # upgrades stay opt-in via a reviewable Renovate PR.
-          image: jellyfin/jellyfin:12.1
+          image: jellyfin/jellyfin:12.2
           imagePullPolicy: Always
           ports:
             - containerPort: 8096
