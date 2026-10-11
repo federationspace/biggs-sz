@@ -88,6 +88,23 @@ spec:
         provider: host
         connections:
           requireMsgr2: true
+      # CVE-2025-30156: rotate every CephX key to clear AUTH_INSECURE_SERVICE_KEY_TYPE
+      # (HEALTH_ERR, which also blocks Rook from upgrading Ceph). Bump keyGeneration
+      # to rotate again. Do not set allowedCiphers: CSI keys stay aes, so
+      # restricting ciphers would block every PVC mount.
+      security:
+        cephx:
+          daemon:
+            keyRotationPolicy: KeyGeneration
+            keyGeneration: 2
+          csi:
+            keyRotationPolicy: KeyGeneration
+            keyGeneration: 2
+            keepPriorKeyCountMax: 1 # existing PVC mounts keep working
+            keyType: aes # control-00, worker-00, worker-01 run kernel 6.8; aes256k krbd needs 7.0+
+          rbdMirrorPeer:
+            keyRotationPolicy: KeyGeneration
+            keyGeneration: 2 # no peer configured, so the default key type is fine
       resources:
         mon:
           requests:
