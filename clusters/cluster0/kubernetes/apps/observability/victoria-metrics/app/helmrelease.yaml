@@ -68,8 +68,11 @@ spec:
       # CRDs that exist at startup. Bump this label whenever such a CRD is added
       # (see observability/prometheus-operator-crds) so the pod restarts and
       # picks it up; without a restart PrometheusRules are silently not converted.
+      # Bump it in a separate PR merged AFTER the CRD is installed: on first rollout
+      # the KS dependsOn is not yet known to Flux, so a same-commit bump can restart
+      # the operator before the CRD exists (revision 1 did exactly that).
       podLabels:
-        prometheus-crds-revision: "1"
+        prometheus-crds-revision: "2"
 
     defaultDashboards:
       # -- Enable custom dashboards installation
