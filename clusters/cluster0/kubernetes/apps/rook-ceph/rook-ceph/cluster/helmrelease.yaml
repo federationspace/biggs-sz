@@ -10,7 +10,7 @@ spec:
   chart:
     spec:
       chart: rook-ceph-cluster
-      version: v1.20.4
+      version: v1.20.8
       sourceRef:
         kind: HelmRepository
         name: rook-ceph
@@ -76,8 +76,9 @@ spec:
         modules:
           - name: pg_autoscaler
             enabled: true
+          # Rook recommends disabling the rook module before Tentacle
           - name: rook
-            enabled: true
+            enabled: false
           - name: telemetry
             enabled: false
       mon:
