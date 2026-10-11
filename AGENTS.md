@@ -96,6 +96,17 @@ kubernetes/apps/<ns>/<app>/
 - **TLS**: cert-manager with the `letsencrypt-prod` ClusterIssuer via
   Cloudflare DNS-01. One `Certificate`, `wildcard-gregbob-net` in `network`,
   covers `*.gregbob.net` and the apex.
+- **Monitoring is VictoriaMetrics, not Prometheus.** Scrape with
+  `VMServiceScrape` and alert with `VMRule`; vmagent and vmalert run
+  `selectAllByDefault: true`, so objects in any namespace are discovered.
+  There is no Prometheus operator. Of its CRDs, only `PrometheusRule` is
+  installed (`observability/prometheus-operator-crds`), so charts can ship
+  upstream alert rules that the VM operator converts to `VMRule`s. Leave the
+  `ServiceMonitor` CRD off: it would make charts (volsync, Rook) emit
+  ServiceMonitors that duplicate the existing VMServiceScrapes. Adding any
+  `monitoring.coreos.com` CRD needs a VM operator restart (bump
+  `victoria-metrics-operator.podLabels.prometheus-crds-revision`). Alerts route
+  to Matrix via `matrix-alertmanager-receiver`.
 
 ## Validation
 

@@ -28,8 +28,11 @@ spec:
     crds:
       enabled: true
     enableDiscoveryDaemon: true
+    # Only grants the operator RBAC to create ServiceMonitors, which this
+    # cluster does not use (Ceph is scraped by VMServiceScrapes). See the
+    # monitoring block in ../cluster/helmrelease.yaml.
     monitoring:
-      enabled: true
+      enabled: false
     resources:
       requests:
         memory: 128Mi # unchangable

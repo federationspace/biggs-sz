@@ -19,9 +19,30 @@ spec:
         name: rook-ceph
         namespace: flux-system
   values:
+    # Ceph alerting. Metrics are scraped by the VMServiceScrapes in
+    # vmservicescrape.yaml (VM-native), so monitoring.enabled stays false: true
+    # only makes Rook try to create ServiceMonitors, and this cluster has no
+    # ServiceMonitor CRD by design (see observability/prometheus-operator-crds).
+    # metricsDisabled stays false, which keeps the mgr prometheus module and the
+    # per-node ceph-exporter running.
+    # createPrometheusRules ships Ceph's upstream alert set as a PrometheusRule;
+    # the VM operator converts it to a VMRule for vmalert.
     monitoring:
-      enabled: true
-      # createPrometheusRules: true
+      enabled: false
+      createPrometheusRules: true
+      prometheusRuleOverrides:
+        # Accepted, known warnings until Phase E of the Ceph plan (CSI keys to
+        # aes256k after control-00, worker-00, worker-01 reach kernel 7.0).
+        # Without this the alert would fire permanently and train us to ignore
+        # it. Fires on any OTHER health check; drop the exclusion with Phase E.
+        CephHealthWarning:
+          expr: >-
+            ceph_health_status == 1 and on()
+            (max(ceph_health_detail{name!~"AUTH_INSECURE_(CLIENT_KEY_TYPE|KEYS_ALLOWED|KEYS_CREATABLE)"}) == 1)
+        # Upstream selects job="ceph" (a plain Prometheus job name); ours is
+        # rook-ceph-mgr, so the stock rule could never fire.
+        CephMgrPrometheusModuleInactive:
+          expr: up{job="rook-ceph-mgr"} == 0
     toolbox:
       enabled: true
     # No cephImage pin, by design: the Ceph version is the Rook chart default

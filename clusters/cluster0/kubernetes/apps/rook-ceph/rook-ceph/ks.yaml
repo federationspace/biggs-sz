@@ -62,3 +62,5 @@ spec:
   timeout: 5m
   dependsOn:
     - name: rook-ceph-operator
+    # monitoring.createPrometheusRules renders a PrometheusRule
+    - name: prometheus-operator-crds
