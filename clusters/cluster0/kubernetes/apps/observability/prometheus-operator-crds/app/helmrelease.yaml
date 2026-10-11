@@ -1,0 +1,57 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+# Installs ONLY the PrometheusRule CRD (no Prometheus operator). Its one job:
+# let the Rook cluster chart ship Ceph's upstream alert rules
+# (monitoring.createPrometheusRules), which the VictoriaMetrics operator's
+# built-in converter turns into a VMRule that vmalert loads.
+#
+# Every other CRD stays off on purpose. A ServiceMonitor CRD would make volsync
+# render its ServiceMonitor (Capabilities-gated in its chart) and would let Rook
+# emit ServiceMonitors that collide with the hand-written VMServiceScrapes in
+# rook-ceph/cluster/vmservicescrape.yaml. Scrapes here are VM-native.
+#
+# The VM operator only detects these CRDs at startup; see the restart marker in
+# victoria-metrics/app/helmrelease.yaml (victoria-metrics-operator.podLabels).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: prometheus-operator-crds
+  namespace: observability
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: prometheus-operator-crds
+      version: 32.0.1
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    crds:
+      prometheusrules:
+        enabled: true
+      alertmanagerconfigs:
+        enabled: false
+      alertmanagers:
+        enabled: false
+      podmonitors:
+        enabled: false
+      probes:
+        enabled: false
+      prometheusagents:
+        enabled: false
+      prometheuses:
+        enabled: false
+      scrapeconfigs:
+        enabled: false
+      servicemonitors:
+        enabled: false
+      thanosrulers:
+        enabled: false

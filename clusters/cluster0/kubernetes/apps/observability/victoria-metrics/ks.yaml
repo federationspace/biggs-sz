@@ -18,3 +18,7 @@ spec:
   interval: 3m
   retryInterval: 1m
   timeout: 2m
+  # The VM operator's Prometheus converter only registers for CRDs present
+  # when it starts, so the PrometheusRule CRD must exist first.
+  dependsOn:
+    - name: prometheus-operator-crds

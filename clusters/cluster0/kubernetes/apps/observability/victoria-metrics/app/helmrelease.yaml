@@ -64,6 +64,12 @@ spec:
       operator:
         # -- By default, operator converts prometheus-operator objects.
         disable_prometheus_converter: false
+      # The operator registers converter controllers only for monitoring.coreos.com
+      # CRDs that exist at startup. Bump this label whenever such a CRD is added
+      # (see observability/prometheus-operator-crds) so the pod restarts and
+      # picks it up; without a restart PrometheusRules are silently not converted.
+      podLabels:
+        prometheus-crds-revision: "1"
 
     defaultDashboards:
       # -- Enable custom dashboards installation

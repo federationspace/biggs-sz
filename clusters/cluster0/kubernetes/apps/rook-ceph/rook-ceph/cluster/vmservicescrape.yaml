@@ -1,19 +1,20 @@
 ---
-# Scrape the active Rook-Ceph mgr's Prometheus module into VictoriaMetrics.
+# Scrape Ceph metrics into VictoriaMetrics with VM-native objects.
 #
-# Both rook charts set monitoring.enabled: true, but that makes Rook emit
-# ServiceMonitor (monitoring.coreos.com/v1) CRs -- and the Prometheus Operator
-# CRDs are NOT installed in this cluster (kubectl get servicemonitor errors:
-# "the server doesn't have a resource type"). So Rook's ServiceMonitors never
-# take effect and NO ceph_* metrics were being ingested. This VMServiceScrape
-# bridges that gap: vmagent (observability/stack) runs selectAllByDefault=true,
-# so this is auto-discovered with no vmagent config change.
+# Rook's own monitoring.enabled would emit ServiceMonitors instead; this cluster
+# installs no ServiceMonitor CRD (see observability/prometheus-operator-crds),
+# so monitoring.enabled is false and these two objects do the scraping.
+# vmagent (observability/stack) runs selectAllByDefault=true, so both are
+# auto-discovered with no vmagent config change.
 #
-# The mgr Prometheus module (ceph mgr module enable prometheus, done by Rook
-# when monitoring.enabled=true) exposes /metrics on :9283 with the full ceph_*
-# series: ceph_health_status, ceph_cluster_total_used_bytes, ceph_pool_bytes_used,
-# ceph_osd_up, ceph_mon_quorum, ceph_pg_*, etc. The service selector targets
-# only the ACTIVE mgr (mgr_role=active), so failover doesn't double-scrape.
+# The job names (rook-ceph-mgr, rook-ceph-exporter) come from the Service names
+# and are what Rook's alert rules expect: PrometheusJobMissing and
+# PrometheusJobExporterMissing alert when either job disappears.
+
+# Active mgr's prometheus module (:9283): cluster-wide ceph_* series
+# (ceph_health_status, ceph_health_detail, ceph_osd_up, ceph_pool_*, ceph_pg_*).
+# The rook-ceph-mgr Service selects mgr_role=active itself, so a mgr failover
+# never double-scrapes.
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMServiceScrape
 metadata:
@@ -28,3 +29,22 @@ spec:
     - port: http-metrics
       path: /metrics
       interval: 30s
+---
+# Per-node ceph-exporter (:9926): per-daemon perf counters (latency, slow ops)
+# that the mgr no longer exports. One pod per node; honorLabels keeps the
+# exporter's own ceph_daemon/instance labels, as Rook's ServiceMonitor would.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: rook-ceph-exporter
+  namespace: rook-ceph
+spec:
+  selector:
+    matchLabels:
+      app: rook-ceph-exporter
+      rook_cluster: rook-ceph
+  endpoints:
+    - port: ceph-exporter-http-metrics
+      path: /metrics
+      interval: 30s
+      honorLabels: true
