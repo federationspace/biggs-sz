@@ -39,11 +39,12 @@
   ],
   "packageRules": [
     {
-      "description": "Pin ceph daemon image to Squid; major upgrades are intentional (see rook-ceph cluster helmrelease comment)",
-      "matchManagers": ["flux"],
+      "description": "Ceph image: only stable x.2.z tags if ever pinned; normally unpinned and set by the Rook chart default",
       "matchDatasources": ["docker"],
       "matchPackageNames": ["quay.io/ceph/ceph"],
-      "allowedVersions": "<20.0.0"
+      "versioning": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)(-(?<build>\\d{8}))?$",
+      "allowedVersions": "/^v\\d+\\.2\\.\\d+(-\\d{8})?$/",
+      "dependencyDashboardApproval": true
     },
     {
       "description": "Flux HelmRelease dependencies",
@@ -57,6 +58,12 @@
       "matchDatasources": ["helm"],
       "matchUpdateTypes": ["minor", "patch"],
       "automerge": true
+    },
+    {
+      "description": "Rook charts pick the default Ceph version (a minor Rook bump can carry a Ceph major); never automerge, merge by hand after reading the release notes and checking ceph health detail",
+      "matchDatasources": ["helm"],
+      "matchPackageNames": ["/^rook-ceph/"],
+      "automerge": false
     },
     {
       "description": "Group Rook Ceph charts",
