@@ -28,3 +28,4 @@ resources:
   - cert-manager-csi-driver-oci.yaml
   - flux-operator-mcp-oci.yaml
   - agent-sandbox-git.yaml
+  - kube-prometheus-repo.yaml
