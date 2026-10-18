@@ -31,10 +31,13 @@ spec:
       enabled: false
       createPrometheusRules: true
       prometheusRuleOverrides:
-        # Accepted, known warnings until Phase E of the Ceph plan (CSI keys to
-        # aes256k after control-00, worker-00, worker-01 reach kernel 7.0).
+        # Accepted, known warnings while CSI keys migrate to aes256k. The prior
+        # aes CSI key (keepPriorKeyCountMax: 1) keeps AUTH_INSECURE_CLIENT_KEY_TYPE
+        # up until it is dropped, and the KEYS_ALLOWED/KEYS_CREATABLE pair until
+        # allowedCiphers is restricted to aes256k (see security.cephx below).
         # Without this the alert would fire permanently and train us to ignore
-        # it. Fires on any OTHER health check; drop the exclusion with Phase E.
+        # it. Fires on any OTHER health check; drop the exclusion after
+        # allowedCiphers lands.
         CephHealthWarning:
           expr: >-
             ceph_health_status == 1 and on()
@@ -111,8 +114,11 @@ spec:
           requireMsgr2: true
       # CVE-2025-30156: rotate every CephX key to clear AUTH_INSECURE_SERVICE_KEY_TYPE
       # (HEALTH_ERR, which also blocks Rook from upgrading Ceph). Bump keyGeneration
-      # to rotate again. Do not set allowedCiphers: CSI keys stay aes, so
-      # restricting ciphers would block every PVC mount.
+      # to rotate again. Do not set allowedCiphers yet: PVCs mounted before the
+      # CSI rotation still authenticate with the prior aes key, so restricting
+      # ciphers to aes256k would cut them off. Order: rotate CSI to aes256k, drain
+      # each node so its PVCs remount with the new key, set keepPriorKeyCountMax: 0,
+      # then allowedCiphers: [aes256k].
       security:
         cephx:
           daemon:
@@ -120,9 +126,9 @@ spec:
             keyGeneration: 2
           csi:
             keyRotationPolicy: KeyGeneration
-            keyGeneration: 2
-            keepPriorKeyCountMax: 1 # existing PVC mounts keep working
-            keyType: aes # control-00, worker-00, worker-01 run kernel 6.8; aes256k krbd needs 7.0+
+            keyGeneration: 3
+            keepPriorKeyCountMax: 1 # gen 2 (aes) stays valid for PVCs already mounted
+            keyType: aes256k # krbd needs kernel 7.0+; every node runs 7.0.0-38 since 2026-10-18
           rbdMirrorPeer:
             keyRotationPolicy: KeyGeneration
             keyGeneration: 2 # no peer configured, so the default key type is fine
