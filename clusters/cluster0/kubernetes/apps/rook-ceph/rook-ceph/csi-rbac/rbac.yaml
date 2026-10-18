@@ -6,9 +6,12 @@
 # chart cannot emit the short SA names this operator expects
 # (CSI_SERVICE_ACCOUNT_PREFIX is empty -> rbd-ctrlplugin-sa / rbd-nodeplugin-sa).
 # These objects are therefore managed directly here. Rule sets are taken
-# verbatim from the ceph-csi-drivers v1.0.1 chart; only object names and
+# verbatim from the ceph-csi-drivers chart (v1.0.1, plus the rules added by
+# ceph-csi-operator v1.1.0, which Rook v1.21.0 ships); only object names and
 # binding subjects are set to the names the operator renders into the
 # rook-ceph.rbd.csi.ceph.com ctrlplugin Deployment and nodeplugin DaemonSet.
+# When Rook bumps the ceph-csi-operator, diff these rules against
+# ceph-csi-operator deploy/charts/ceph-csi-drivers/templates/rbd-*-rbac.yaml.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -118,6 +121,7 @@ rules:
   - get
   - list
   - watch
+  - update
 - apiGroups:
   - snapshot.storage.k8s.io
   resources:
@@ -246,6 +250,14 @@ rules:
   verbs:
   - get
   - list
+- apiGroups:
+  - storage.k8s.io
+  resources:
+  - volumeattributesclasses
+  verbs:
+  - get
+  - list
+  - watch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -320,6 +332,7 @@ rules:
   - persistentvolumeclaims
   verbs:
   - get
+  - patch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
