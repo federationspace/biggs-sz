@@ -31,9 +31,9 @@ spec:
       enabled: false
       createPrometheusRules: true
       prometheusRuleOverrides:
-        # Accepted, known warnings while CSI keys migrate to aes256k. The prior
-        # aes CSI key (keepPriorKeyCountMax: 1) keeps AUTH_INSECURE_CLIENT_KEY_TYPE
-        # up until it is dropped, and the KEYS_ALLOWED/KEYS_CREATABLE pair until
+        # Accepted, known warnings while CSI keys migrate to aes256k.
+        # AUTH_INSECURE_CLIENT_KEY_TYPE clears once keepPriorKeyCountMax: 0 removes
+        # the prior aes CSI keys; the KEYS_ALLOWED/KEYS_CREATABLE pair clears when
         # allowedCiphers is restricted to aes256k (see security.cephx below).
         # Without this the alert would fire permanently and train us to ignore
         # it. Fires on any OTHER health check; drop the exclusion after
@@ -114,11 +114,10 @@ spec:
           requireMsgr2: true
       # CVE-2025-30156: rotate every CephX key to clear AUTH_INSECURE_SERVICE_KEY_TYPE
       # (HEALTH_ERR, which also blocks Rook from upgrading Ceph). Bump keyGeneration
-      # to rotate again. Do not set allowedCiphers yet: PVCs mounted before the
-      # CSI rotation still authenticate with the prior aes key, so restricting
-      # ciphers to aes256k would cut them off. Order: rotate CSI to aes256k, drain
-      # each node so its PVCs remount with the new key, set keepPriorKeyCountMax: 0,
-      # then allowedCiphers: [aes256k].
+      # to rotate again. CSI migration to aes256k: gen 3 rotated and every PVC
+      # remounted on it (2026-10-18), then keepPriorKeyCountMax: 0 deletes the
+      # prior aes keys. Last step: allowedCiphers: [aes256k], once
+      # `ceph auth dump-keys` shows no aes key.
       security:
         cephx:
           daemon:
@@ -127,7 +126,10 @@ spec:
           csi:
             keyRotationPolicy: KeyGeneration
             keyGeneration: 3
-            keepPriorKeyCountMax: 1 # gen 2 (aes) stays valid for PVCs already mounted
+            # 0: delete prior generations. Every PVC remounted on gen 3 (2026-10-18);
+            # mon sessions showed no csi-*.2 client. When rotating again, set 1 first
+            # so existing mounts keep working, remount, then return to 0.
+            keepPriorKeyCountMax: 0
             keyType: aes256k # krbd needs kernel 7.0+; every node runs 7.0.0-38 since 2026-10-18
           rbdMirrorPeer:
             keyRotationPolicy: KeyGeneration
