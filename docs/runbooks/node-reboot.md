@@ -250,7 +250,11 @@ Options, in order of preference:
 
 ## Fix 4: Ceph is unhealthy right now
 
-Independent of reboots. Current state:
+> **Resolved 2026-10-18.** Every CephX key was rotated to `aes256k` (daemon
+> keys on 2026-10-11, CSI keys on 2026-10-18 after all nodes reached kernel
+> 7.0), and the mons now allow only `aes256k`. `MON_DISK_LOW` was cleared by
+> shrinking the vmsingle PVC. The quorum-and-PG gate below still applies
+> whenever health is not `HEALTH_OK`. Historical state at the time of writing:
 
 ```
 HEALTH_ERR

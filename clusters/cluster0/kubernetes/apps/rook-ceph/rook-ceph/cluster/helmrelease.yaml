@@ -31,17 +31,6 @@ spec:
       enabled: false
       createPrometheusRules: true
       prometheusRuleOverrides:
-        # Accepted, known warnings while CSI keys migrate to aes256k.
-        # AUTH_INSECURE_CLIENT_KEY_TYPE clears once keepPriorKeyCountMax: 0 removes
-        # the prior aes CSI keys; the KEYS_ALLOWED/KEYS_CREATABLE pair clears when
-        # allowedCiphers is restricted to aes256k (see security.cephx below).
-        # Without this the alert would fire permanently and train us to ignore
-        # it. Fires on any OTHER health check; drop the exclusion after
-        # allowedCiphers lands.
-        CephHealthWarning:
-          expr: >-
-            ceph_health_status == 1 and on()
-            (max(ceph_health_detail{name!~"AUTH_INSECURE_(CLIENT_KEY_TYPE|KEYS_ALLOWED|KEYS_CREATABLE)"}) == 1)
         # Upstream selects job="ceph" (a plain Prometheus job name); ours is
         # rook-ceph-mgr, so the stock rule could never fire.
         CephMgrPrometheusModuleInactive:
@@ -114,12 +103,17 @@ spec:
           requireMsgr2: true
       # CVE-2025-30156: rotate every CephX key to clear AUTH_INSECURE_SERVICE_KEY_TYPE
       # (HEALTH_ERR, which also blocks Rook from upgrading Ceph). Bump keyGeneration
-      # to rotate again. CSI migration to aes256k: gen 3 rotated and every PVC
-      # remounted on it (2026-10-18), then keepPriorKeyCountMax: 0 deletes the
-      # prior aes keys. Last step: allowedCiphers: [aes256k], once
-      # `ceph auth dump-keys` shows no aes key.
+      # to rotate again. Every key is aes256k since 2026-10-18 (CSI gen 3, prior
+      # aes keys deleted), so the mons accept and create only aes256k.
       security:
         cephx:
+          # Rook sets the monmap auth_allowed_ciphers from this. Any client still
+          # holding an aes key is refused (RADOS permission denied), including a
+          # node kernel older than 7.0 mounting an RBD volume. Never set a
+          # component keyType: aes while this is in place; recovery steps are
+          # in Rook's cephx-key-rotation.md ("Fixing cluster unavailability").
+          allowedCiphers:
+            - aes256k
           daemon:
             keyRotationPolicy: KeyGeneration
             keyGeneration: 2
