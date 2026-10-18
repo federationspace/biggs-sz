@@ -338,7 +338,9 @@ spec:
             memory: "2000Mi"
         port: "8428"
         # -- Data retention period. Possible units character: h(ours), d(ays), w(eeks), y(ears), if no unit character specified - month. The minimum retention period is 24h. See these [docs](https://docs.victoriametrics.com/victoriametrics/single-server-victoriametrics/#retention)
-        retentionPeriod: "1"
+        # 14d (was "1" = 1 month, which keeps up to 2 months on disk since
+        # partitions are monthly). Lives on control-00's root disk (local-path).
+        retentionPeriod: "14d"
         replicaCount: 1
         extraArgs:
           maxLabelsPerTimeseries: "150"
@@ -1088,9 +1090,25 @@ spec:
             - action: drop
               source_labels: [__name__]
               regex: (rest_client_request_duration_seconds_bucket|rest_client_request_duration_seconds_sum|rest_client_request_duration_seconds_count)
+            # k3s embeds the apiserver in the server process, so control-00's
+            # kubelet /metrics re-exports every apiserver/etcd family that the
+            # apiserver job already scrapes (~107k duplicate series, about a
+            # quarter of the TSDB). No rule or dashboard reads them via
+            # job="kubelet". k3s_* (cert expiry, LB health) is kept.
+            - action: drop
+              source_labels: [metrics_path, __name__]
+              separator: ";"
+              regex: /metrics;(apiserver|etcd|apiextensions|aggregator|kine)_.+
+            # High-cardinality cadvisor/probe families unused by any rule or
+            # dashboard (checked 2026-10-18).
+            - action: drop
+              source_labels: [__name__]
+              regex: (container_tasks_state|container_memory_failures_total|prober_probe_duration_seconds_bucket)
           relabelConfigs:
-            - action: labelmap
-              regex: __meta_kubernetes_node_label_(.+)
+            # The chart's labelmap of __meta_kubernetes_node_label_(.+) is
+            # removed: it copied ~70 node labels (mostly NFD feature_node_*)
+            # onto every kubelet series. Nothing queries them; `node` is set
+            # by the operator from __meta_kubernetes_node_name.
             - sourceLabels: [__metrics_path__]
               targetLabel: metrics_path
             - targetLabel: job
