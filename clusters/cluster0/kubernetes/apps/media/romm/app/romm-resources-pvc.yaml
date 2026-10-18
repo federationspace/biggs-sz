@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: romm-resources
+  name: romm-resources-ceph
   namespace: media
   labels:
     app: romm
@@ -10,5 +10,5 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 20Gi
-  storageClassName: local-path
+      storage: 10Gi
+  storageClassName: ceph-block

@@ -6,11 +6,7 @@ metadata:
   name: romm
   namespace: media
 spec:
-  # Scaled to 0 (2026-10-18): romm's startup migration (full-table UPDATE on
-  # roms) pushes the cnpg-romm primary past its 500Mi memory limit, which OOMs
-  # it and triggers a CNPG failover loop. Restore to 1 after raising the
-  # cnpg-romm memory limit (databases/cnpg/databases/cnpg-romm.yaml).
-  replicas: 0
+  replicas: 1
   selector:
     matchLabels:
       app: romm
@@ -19,11 +15,12 @@ spec:
       labels:
         app: romm
     spec:
-      nodeSelector:
-        kubernetes.io/hostname: control-00
       containers:
-        - image: rommapp/romm:latest
-          imagePullPolicy: Always
+        # Pinned: romm runs its pending alembic migrations on every start, so a
+        # floating tag turned a routine pod restart into an unreviewed schema
+        # upgrade. Bump through a Renovate PR.
+        - image: rommapp/romm:5.4.0
+          imagePullPolicy: IfNotPresent
           name: romm
           env:
             - name: TZ
@@ -72,13 +69,13 @@ spec:
       volumes:
         - name: resources
           persistentVolumeClaim:
-            claimName: romm-resources
+            claimName: romm-resources-ceph
         - name: redis
           persistentVolumeClaim:
-            claimName: romm-redis
+            claimName: romm-redis-ceph
         - name: assets
           persistentVolumeClaim:
-            claimName: romm-assets
+            claimName: romm-assets-ceph
         - name: library
           persistentVolumeClaim:
             claimName: media-pvc
