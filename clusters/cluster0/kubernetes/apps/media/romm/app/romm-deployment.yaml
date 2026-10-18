@@ -6,7 +6,11 @@ metadata:
   name: romm
   namespace: media
 spec:
-  replicas: 1
+  # Scaled to 0 (2026-10-18): romm's startup migration (full-table UPDATE on
+  # roms) pushes the cnpg-romm primary past its 500Mi memory limit, which OOMs
+  # it and triggers a CNPG failover loop. Restore to 1 after raising the
+  # cnpg-romm memory limit (databases/cnpg/databases/cnpg-romm.yaml).
+  replicas: 0
   selector:
     matchLabels:
       app: romm
