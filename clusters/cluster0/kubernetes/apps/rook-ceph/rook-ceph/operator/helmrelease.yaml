@@ -27,6 +27,13 @@ spec:
     # managed in ../csi-rbac.
     crds:
       enabled: true
+    # v1.21.0 renders ROOK_CREATE_CSI_OPERATOR_RESOURCES into the operator
+    # ConfigMap, but the chart no longer ships a default for it, so it renders
+    # as "" and the operator reads that as off. Off makes Rook DELETE the
+    # CephConnection and ClientProfile the RBD CSI driver uses to reach the
+    # mons. Set it explicitly until upstream restores the default.
+    csi:
+      createCsiOperatorResources: true
     enableDiscoveryDaemon: true
     # Only grants the operator RBAC to create ServiceMonitors, which this
     # cluster does not use (Ceph is scraped by VMServiceScrapes). See the
