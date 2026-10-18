@@ -18,7 +18,11 @@ spec:
       memory: 500Mi
       cpu: 500m
     limits:
-      memory: 500Mi
+      # PostgreSQL 18 leaks executor memory per row (about 215Ki) in UPDATEs on
+      # tables with STORED generated columns, and romm's roms table has dozens.
+      # romm 5.4.0's full-table backfill on 8454 roms peaked at 1919Mi; a 1Gi
+      # limit still OOMs. Raise this if the roms table grows past ~13k rows.
+      memory: 3Gi
   storage:
     size: 10Gi
     storageClass: local-path
