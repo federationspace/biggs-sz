@@ -19,8 +19,12 @@ spec:
         # with that tag it proposed nothing and new builds instead arrived
         # silently on any pod restart (imagePullPolicy is Always). Use the full
         # X.Y.Z.BUILD-lsNNN build tag; the bare 6.4.4 alias is republished on
-        # every build of that minor, so it floats.
-        - image: lscr.io/linuxserver/radarr:6.4.4.10685-ls318
+        # every build of that minor, so it floats. Hosted on ghcr.io, not
+        # lscr.io: lscr.io is a redirect in front of GHCR and Renovate's
+        # anonymous lookups through it share GHCR's anonymous rate bucket and
+        # 429, so the tag never resolved; ghcr.io serves the identical image
+        # and looks up fine.
+        - image: ghcr.io/linuxserver/radarr:6.4.4.10685-ls318
           imagePullPolicy: Always
           name: radarr
           env:

@@ -47,6 +47,12 @@
       "dependencyDashboardApproval": true
     },
     {
+      "description": "Linuxserver images tag as X.Y.Z.BUILD-lsNNN (e.g. 4.0.20.3014-ls325). The default docker versioning treats the -lsNNN suffix as a compatibility marker, so a newer base-image build of the same app version is never proposed; explicit groups make lsNNN the last compared component, which reads as a patch bump and lands in the media-apps group. Anchored so arch-prefixed (amd64-*) and floating (develop-*, version-*) tags are excluded. Matches both registries so a future lscr.io pin is covered too",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["/^(lscr\\.io|ghcr\\.io)/linuxserver//"],
+      "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\.(?<build>\\d+)-ls(?<revision>\\d+)$"
+    },
+    {
       "description": "Flux HelmRelease dependencies",
       "matchManagers": ["flux"],
       "matchDatasources": ["helm"],
