@@ -1,0 +1,12 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hermes
+  labels:
+    # PSA baseline (not restricted): the s6-overlay init container starts as
+    # root to chown the volume and the pod declares no runAsNonRoot, so
+    # restricted would block admission. Matches the matrix/ convention.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline

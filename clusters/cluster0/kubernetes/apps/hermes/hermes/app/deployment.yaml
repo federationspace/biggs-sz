@@ -5,7 +5,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: hermes
-  namespace: ai-system
+  namespace: hermes
   labels:
     app.kubernetes.io/name: hermes
 ---
@@ -17,7 +17,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: hermes-data
-  namespace: ai-system
+  namespace: hermes
   labels:
     app.kubernetes.io/name: hermes
 spec:
@@ -32,7 +32,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: hermes
-  namespace: ai-system
+  namespace: hermes
   labels:
     app.kubernetes.io/name: hermes
     app.kubernetes.io/version: "v2026.8.18"
@@ -54,7 +54,7 @@ spec:
       serviceAccountName: hermes
       terminationGracePeriodSeconds: 30
       # CPU-only workload (inference is external via Nous Portal). Do NOT pin
-      # nvidia.com/gpu.present -- that made other ai-system pods unschedulable.
+      # nvidia.com/gpu.present -- that made other pods unschedulable.
       # Softly prefer non-GPU nodes so Hermes never competes with vLLM/gaming
       # for the GPU node's resources.
       affinity:
