@@ -1,0 +1,31 @@
+---
+# Gateway-level header fix: tell every backend which scheme the client used.
+#
+# Why: agentgateway passes through the x-forwarded-proto it receives from
+# Cloudflare, but traffic that reaches the gateway directly (LAN clients
+# via 192.168.2.9, or any non-CF path) carries no scheme hint, so backends
+# that build absolute URLs fall back to http and redirect clients to
+# http:// (observed on the *arr login 302s, which dead-ended on the
+# unexposed public :80).
+#
+# Setting x-forwarded-proto from the listener scheme is correct for every
+# listener: the 443 listeners report https, the 80 listener reports http,
+# and for Cloudflare traffic the value equals what CF already sent.
+# Backends trust the gateway's pod IPs (Trusted Networks 10.42.0.0/16 in
+# the *arr configs) and honor the header from there.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: set-forwarded-proto
+  namespace: network
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: wildcard-gregbob-net
+  traffic:
+    transformation:
+      request:
+        set:
+          - name: x-forwarded-proto
+            value: 'request.scheme'
