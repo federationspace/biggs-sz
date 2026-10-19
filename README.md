@@ -57,14 +57,12 @@ certificate details.
 clusters/cluster0/
 ├── flux-system/                # FluxInstance + Helm/OCI/Git repository sources
 └── kubernetes/apps/
-    ├── ai-system/               # agent-sandbox, codebase-memory-mcp, csi-driver, embeddings,
-    │                            # exa-mcp, flux-mcp, hermes, kagent(-crds), mindwtr-mcp,
-    │                            # substrate(-crds), victoria-metrics-mcp, vllm
     ├── cert-manager/            # cert-manager (ACME/DNS-01 issuers)
     ├── databases/                # cnpg (CloudNativePG)
     ├── external-secrets/         # external-secrets, onepassword-connect
     ├── git-system/                # gitea, act_runner
     ├── gregbob/                   # gregbob, personal site/services
+    ├── hermes/                    # hermes (Matrix cluster assistant, hermes.gregbob.net)
     ├── kube-system/                # cilium (CNI + BGP/L2), nfs, nfd, intel-gpu-plugin,
     │                              # volsync, snapshot-controller
     ├── livekit/                   # livekit (self-hosted LiveKit SFU + lk-jwt-service,

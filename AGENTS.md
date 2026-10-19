@@ -120,8 +120,3 @@ kubectl kustomize clusters/cluster0/kubernetes/apps/<ns>
 kubectl get kustomizations -n flux-system
 flux get sources all
 ```
-
-Note: several `ai-system` Kustomizations (`kagent`, `substrate`,
-`agent-sandbox` and their dependents) are persistently `False` on upstream
-CRD-schema mismatches. That is pre-existing; do not treat it as breakage
-caused by an unrelated change.

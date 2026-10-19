@@ -37,7 +37,7 @@ data:
       basic-password: "${WEBHOOK_BASIC_PASSWORD}"
     matrix:
       # In-cluster client-server API of continuwuity; bypasses the Cloudflare
-      # tunnel entirely, same as ai-system/hermes does.
+      # tunnel entirely, same as hermes does.
       homeserver-url: http://continuwuity-service.matrix.svc.cluster.local:8080
       user-id: "${MATRIX_USER_ID}"
       access-token: "${MATRIX_ACCESS_TOKEN}"
@@ -45,7 +45,7 @@ data:
       # (it POSTs to /alerts/mercury). "mercury" is the Mercury room in the
       # Hermitage space. A room ID is not a credential, so it is declared in
       # Git deliberately -- same reasoning as MATRIX_HOME_ROOM in
-      # ai-system/hermes. Note continuwuity is on a room version whose IDs are
+      # hermes. Note continuwuity is on a room version whose IDs are
       # bare hashes with no ":server" suffix; that is correct, not truncated.
       #
       # Mercury MUST stay unencrypted: this bridge has no E2EE support, and an
