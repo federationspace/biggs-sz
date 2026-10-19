@@ -47,10 +47,16 @@
       "dependencyDashboardApproval": true
     },
     {
-      "description": "Linuxserver images tag as X.Y.Z.BUILD-lsNNN (e.g. 4.0.20.3014-ls325). The default docker versioning treats the -lsNNN suffix as a compatibility marker, so a newer base-image build of the same app version is never proposed; explicit groups make lsNNN the last compared component, which reads as a patch bump and lands in the media-apps group. Anchored so arch-prefixed (amd64-*) and floating (develop-*, version-*) tags are excluded. Matches both registries so a future lscr.io pin is covered too",
+      "description": "Linuxserver images tag as X.Y.Z.BUILD-lsNNN (e.g. 4.0.20.3014-ls325). The default docker versioning treats the -lsNNN suffix as a compatibility marker, so a newer base-image build of the same app version is never proposed; explicit groups make lsNNN the last compared component, which reads as a patch bump and lands in the media-apps group. Anchored so arch-prefixed (amd64-*) and floating (develop-*, version-*) tags are excluded. Matches all three registries linuxserver publishes to (docker.io is the one Renovate can look up without hitting GHCR's anonymous 429)",
       "matchDatasources": ["docker"],
-      "matchPackageNames": ["/^(lscr\\.io|ghcr\\.io)/linuxserver//"],
+      "matchPackageNames": ["/^(docker\\.io|lscr\\.io|ghcr\\.io)/linuxserver//"],
       "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\.(?<build>\\d+)-ls(?<revision>\\d+)$"
+    },
+    {
+      "description": "sabnzbd tags have three version parts, X.Y.Z-lsNNN (e.g. 5.1.3-ls277), so the four-part linuxserver regex above never matches them. Renovate's regex versioning only compares <revision> when <build> is present, so lsNNN is captured as <build> here; an ls bump reads as patch like the other linuxserver images. Anchored so unstable-*, *RC*/Beta and nightly tags are excluded",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["/^(docker\\.io|lscr\\.io|ghcr\\.io)/linuxserver/sabnzbd$/"],
+      "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-ls(?<build>\\d+)$"
     },
     {
       "description": "Plex tags as X.Y.Z.BUILD-<git hash> (e.g. 1.43.4.10903-e5521bd8c). Default docker versioning treats the hash as a compatibility suffix that changes every release, so no newer tag would ever be proposed; this regex compares the four numeric parts and ignores the hash. Anchored so the -amd64/-arm64/-armhf arch aliases and the beta/latest tags are excluded",

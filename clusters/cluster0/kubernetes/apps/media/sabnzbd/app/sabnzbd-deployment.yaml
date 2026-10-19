@@ -14,7 +14,12 @@ spec:
       nodeSelector:
         kubernetes.io/hostname: control-00
       containers:
-        - image: lscr.io/linuxserver/sabnzbd:latest
+        # Pinned so upgrades are opt-in; with `:latest` Renovate saw no
+        # dependency and new builds arrived on any pod restart. Use the full
+        # X.Y.Z-lsNNN build tag (the bare 5.1.3 alias is republished per build,
+        # and the newest tags are unstable/nightly builds). Docker Hub rather
+        # than lscr.io/ghcr.io, whose anonymous lookups 429 in Renovate.
+        - image: docker.io/linuxserver/sabnzbd:5.1.3-ls277
           imagePullPolicy: Always
           name: sabnzbd
           env:
