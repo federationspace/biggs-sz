@@ -54,7 +54,7 @@ spec:
       serviceAccountName: hermes
       terminationGracePeriodSeconds: 30
       # CPU-only workload (inference is external via Nous Portal). Do NOT pin
-      # nvidia.com/gpu.present -- that made other ai-system pods unschedulable.
+      # nvidia.com/gpu.present -- that made other pods unschedulable.
       # Softly prefer non-GPU nodes so Hermes never competes with vLLM/gaming
       # for the GPU node's resources.
       affinity:
