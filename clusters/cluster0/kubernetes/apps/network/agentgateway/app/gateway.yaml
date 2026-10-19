@@ -6,6 +6,12 @@ metadata:
   namespace: network
 spec:
   gatewayClassName: agentgateway
+  infrastructure:
+    annotations:
+      # Pin the client-facing Gateway Service's LB IP. k8s-gateway answers all
+      # gregbob.net HTTPRoute hostnames with this IP and the UDM port-forwards
+      # 80/443 to it, so a Service recreation must not be able to move it.
+      io.cilium/lb-ipam-ips: "192.168.2.9"
   listeners:
   - hostname: "*.gregbob.net"
     name: wildcard-gregbob-net-http
