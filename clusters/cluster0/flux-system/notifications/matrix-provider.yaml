@@ -16,7 +16,7 @@ spec:
   address: http://continuwuity-service.matrix.svc.cluster.local:8080
   # Mercury room ID. A room ID is not a credential, so it is declared in
   # Git deliberately, matching the MATRIX_HOME_ROOM convention in
-  # ai-system/hermes.
+  # hermes.
   channel: "!Sfg0hDmKySOk6uzvatx3Q7nz6YkHQBneFPtmY38zs9Y"
   secretRef:
     name: flux-matrix-token
