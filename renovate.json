@@ -53,6 +53,12 @@
       "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\.(?<build>\\d+)-ls(?<revision>\\d+)$"
     },
     {
+      "description": "Plex tags as X.Y.Z.BUILD-<git hash> (e.g. 1.43.4.10903-e5521bd8c). Default docker versioning treats the hash as a compatibility suffix that changes every release, so no newer tag would ever be proposed; this regex compares the four numeric parts and ignores the hash. Anchored so the -amd64/-arm64/-armhf arch aliases and the beta/latest tags are excluded",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["plexinc/pms-docker"],
+      "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\.(?<build>\\d+)-[0-9a-f]+$"
+    },
+    {
       "description": "Flux HelmRelease dependencies",
       "matchManagers": ["flux"],
       "matchDatasources": ["helm"],
@@ -133,6 +139,13 @@
       "matchManagers": ["kubernetes"],
       "matchDatasources": ["docker"],
       "matchPackageNames": ["jellyfin/jellyfin"],
+      "automerge": false
+    },
+    {
+      "description": "Plex releases land as patch bumps under the regex above, which the media-apps patch automerge would push straight to main; keep every plex bump a reviewed PR",
+      "matchManagers": ["kubernetes"],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["plexinc/pms-docker"],
       "automerge": false
     }
   ]
