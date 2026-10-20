@@ -153,6 +153,13 @@
       "matchDatasources": ["docker"],
       "matchPackageNames": ["plexinc/pms-docker"],
       "automerge": false
+    },
+    {
+      "description": "Linuxserver media apps (sonarr, radarr, prowlarr, sabnzbd): their -lsNNN build bumps read as patch under the linuxserver regex, so the media-apps patch automerge above would otherwise apply. In practice it never fired (no CI or status checks, so branch automerge waits out prNotPendingHours and opens a PR after ~25h), but adding any status check would start merging these to main unattended. Keep every bump a reviewed PR, like jellyfin and plex",
+      "matchManagers": ["kubernetes"],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["/^(docker\\.io|lscr\\.io|ghcr\\.io)/linuxserver//"],
+      "automerge": false
     }
   ]
 }
