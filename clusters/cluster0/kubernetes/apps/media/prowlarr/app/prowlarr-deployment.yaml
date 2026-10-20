@@ -19,12 +19,13 @@ spec:
         # with that tag it proposed nothing and new builds instead arrived
         # silently on any pod restart (imagePullPolicy is Always). Use the full
         # X.Y.Z.BUILD-lsNNN build tag; the bare 2.6.5 alias is republished on
-        # every build of that minor, so it floats. Hosted on ghcr.io, not
-        # lscr.io: lscr.io is a redirect in front of GHCR and Renovate's
-        # anonymous lookups through it share GHCR's anonymous rate bucket and
-        # 429, so the tag never resolved; ghcr.io serves the identical image
-        # and looks up fine.
-        - image: ghcr.io/linuxserver/prowlarr:2.6.5.5623-ls161
+        # every build of that minor, so it floats. Pulled from Docker Hub, not
+        # ghcr.io or lscr.io (a redirect in front of GHCR): Renovate's GHCR
+        # lookups are anonymous, and listing linuxserver's ~16k prowlarr tags
+        # hits GHCR's 429 on a large share of runs, so the lookup returned
+        # no-result and the media-apps branch was deleted before it became a
+        # PR. Docker Hub serves the same digest.
+        - image: docker.io/linuxserver/prowlarr:2.6.5.5623-ls161
           imagePullPolicy: Always
           name: prowlarr
           env:
