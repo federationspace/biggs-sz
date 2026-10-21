@@ -43,6 +43,10 @@ data:
     # failing with "model not found", re-pick from the Portal's free list.
     model:
       default: reflection/beam-1.0-501b-a23b:free
+      # The Portal's /v1/models doesn't expose a context length Hermes can
+      # read for this model, so it guessed 256K and logged a warning. The
+      # real Portal limit is 262144 (top_provider.context_length).
+      context_length: 262144
       # "custom:nous" (not bare "nous"): bare "nous" is shadowed by the built-in
       # nous provider (which demands an OAuth agent_key and fails with "not
       # logged in"). The "custom:<name>" form resolves to the providers.nous
@@ -64,6 +68,50 @@ data:
       hard_stop_after:
         exact_failure: 5
         idempotent_no_progress: 5
+
+    # Auxiliary (side-job) models: context compression, session titles,
+    # curator, memory rewrite, approvals, vision, etc. Left at the default
+    # `provider: auto`, every one of these resolves to the BUILT-IN nous
+    # provider, which needs an OAuth `hermes model` login this pod does not
+    # have; they all failed with "No LLM provider configured". `provider:
+    # custom:nous` does not work here either (aux looks for a
+    # CUSTOM:NOUS_API_KEY env var). Pointing each task straight at the Portal
+    # endpoint with key_env reuses the existing NOUS_API_KEY; no new secret.
+    #
+    # Text tasks use the same free model as the main agent (Beam 1.0). The
+    # compression model's context window must be >= the main model's, which
+    # using the same model guarantees. Vision uses Ornith 1.5 122B (free,
+    # image input; verified). Step 3.7 Flash, the Portal's advertised free
+    # vision model, returns 400 "missing tags" on every request, so it is
+    # deliberately not used.
+    #
+    # The anchors keep the endpoint + key in one place. When the main model
+    # changes, update &aux_text's model too.
+    auxiliary:
+      compression: &aux_text
+        base_url: https://inference-api.nousresearch.com/v1
+        key_env: NOUS_API_KEY
+        model: reflection/beam-1.0-501b-a23b:free
+      title_generation: *aux_text
+      curator: *aux_text
+      background_review: *aux_text
+      memory_query_rewrite: *aux_text
+      approval: *aux_text
+      skills_hub: *aux_text
+      mcp: *aux_text
+      review: *aux_text
+      goal_judge: *aux_text
+      monitor: *aux_text
+      triage_specifier: *aux_text
+      kanban_decomposer: *aux_text
+      profile_describer: *aux_text
+      tts_audio_tags: *aux_text
+      moa_reference: *aux_text
+      moa_aggregator: *aux_text
+      vision:
+        base_url: https://inference-api.nousresearch.com/v1
+        key_env: NOUS_API_KEY
+        model: ornith/ornith-1.5-122b:free
   SOUL.md: |
     # Hermes -- biggs-sz cluster assistant
 
