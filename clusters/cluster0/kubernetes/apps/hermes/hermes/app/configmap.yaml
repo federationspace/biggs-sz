@@ -33,8 +33,16 @@ data:
     # var (from hermes-secrets via envFrom); the key is NOT stored here.
     # MAINTAINER-TUNABLE: pick any model from the Portal catalog; names follow
     # the OpenRouter convention (vendor/model-id).
+    #
+    # Default is the strongest FREE Portal model: Reflection Beam 1.0 (501B
+    # MoE, 23B active; Artificial Analysis Intelligence Index 30, the highest
+    # published score among the Portal's freeRecommendedModels as of
+    # 2026-10-21). The ":free" suffix is what keeps it at zero cost; dropping
+    # it bills the paid variant. Free variants can be retired without notice
+    # (some carry an expiration_date in /v1/models), so if the bot starts
+    # failing with "model not found", re-pick from the Portal's free list.
     model:
-      default: moonshotai/kimi-k3
+      default: reflection/beam-1.0-501b-a23b:free
       # "custom:nous" (not bare "nous"): bare "nous" is shadowed by the built-in
       # nous provider (which demands an OAuth agent_key and fails with "not
       # logged in"). The "custom:<name>" form resolves to the providers.nous
