@@ -55,7 +55,7 @@ spec:
         # only at pod start, so a ConfigMap edit alone never reaches the
         # running gateway. Bump this value in the same commit as any
         # configmap.yaml change to roll the pod and re-seed the config.
-        hermes.gregbob.net/config-revision: "2"
+        hermes.gregbob.net/config-revision: "3"
     spec:
       serviceAccountName: hermes
       terminationGracePeriodSeconds: 30
