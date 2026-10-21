@@ -25,7 +25,7 @@ spec:
         # hits GHCR's 429 on a large share of runs, so the lookup returned
         # no-result and the media-apps branch was deleted before it became a
         # PR. Docker Hub serves the same digest.
-        - image: docker.io/linuxserver/prowlarr:2.6.5.5623-ls161
+        - image: docker.io/linuxserver/prowlarr:2.6.5.5623-ls165
           imagePullPolicy: Always
           name: prowlarr
           env:
