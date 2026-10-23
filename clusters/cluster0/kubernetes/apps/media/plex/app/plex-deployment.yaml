@@ -6,6 +6,17 @@ metadata:
   labels:
     app: plex
 spec:
+  # Stop the old pod before starting the new one. A single replica pinned to
+  # worker-01 cannot surge a second 6Gi pod onto that node (it lacks the
+  # memory), and the RWO ceph-block config volume cannot attach to two pods,
+  # so the default 25% surge deadlocks every rollout. This is Recreate in
+  # effect; type: Recreate itself is rejected by server-side apply because
+  # the API-defaulted rollingUpdate block has no field owner to clear it.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: plex
