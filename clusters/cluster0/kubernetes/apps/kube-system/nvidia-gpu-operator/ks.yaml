@@ -1,0 +1,65 @@
+---
+# ============================================================================
+# 🟡 DRAFT — GPU stack for the RTX 3090 port (PR #38 review remediation).
+#
+# DO NOT MERGE / DO NOT REGISTER until the GPU is physically installed in a
+# biggs-sz node. This Kustomization is intentionally NOT listed in
+# kube-system/kustomization.yaml, so it is invisible to Flux's auto-discovery
+# and cannot block reconciliation of anything else in this repo.
+#
+# When the hardware lands:
+#   1. Confirm the target node, then set `operator.nodeSelector` below (or add
+#      a taint/toleration + nodeSelector to pin the operator daemonsets, once
+#      the node label is known) — DaemonSets are cluster-wide by default and
+#      will otherwise attempt to schedule (and fail cleanly, but noisily) on
+#      every node.
+#   2. Add `./nvidia-gpu-operator/ks.yaml` to kube-system/kustomization.yaml.
+#   3. Verify against the LIVE cluster (do not assume from this draft):
+#        - k3s containerd config path/socket used below is still correct for
+#          the running k3s version.
+#        - the existing standalone `nfd` HelmRelease (kube-system/nfd) is
+#          compatible with `nfd.enabled: false` here (GPU Operator's
+#          gpu-feature-discovery subchart talking to the existing NFD master
+#          instead of installing a second one) — this is NVIDIA's documented
+#          "use an existing NFD" mode but has NOT been render-tested against
+#          biggs-sz's nfd chart version (0.18.1) in this draft.
+#        - `driver.enabled: true` / `toolkit.enabled: true` are correct for
+#          plain k3s (unlike the source biggs.dog cluster, which runs Talos
+#          with the driver/toolkit provided by Talos system extensions and
+#          therefore disables both here — DO NOT copy that source pattern).
+#   4. `time-slicing.replicas: 4` was copied from source purely as a starting
+#      point (source shares one 5090 across a gaming + vLLM workload). biggs-sz
+#      has no gaming/arbiter use case yet; 1 (no slicing) or a smaller number
+#      is probably correct until a real multi-consumer need exists. DECIDE
+#      before enabling.
+#   5. This ks.yaml already sets `dependsOn: [{name: nfd}]`, matching the
+#      intel-gpu-plugin convention (biggs-sz's other GPU-adjacent device
+#      plugin). Verify the `nfd` Kustomization name still matches at
+#      un-draft time.
+# ============================================================================
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app nvidia-gpu-operator
+  namespace: flux-system
+spec:
+  targetNamespace: kube-system
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  path: ./clusters/cluster0/kubernetes/apps/kube-system/nvidia-gpu-operator/app
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: false
+  healthChecks:
+    - apiVersion: helm.toolkit.fluxcd.io/v2
+      kind: HelmRelease
+      name: nvidia-gpu-operator
+      namespace: kube-system
+  interval: 3m
+  retryInterval: 1m
+  timeout: 5m
+  dependsOn:
+    - name: nfd

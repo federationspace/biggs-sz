@@ -1,0 +1,102 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+#
+# 🟡 DRAFT — see ../ks.yaml header for the full "do not merge until hardware"
+# rationale and the TODO list to work through before un-drafting this.
+#
+# Adapted from shrinedogg/biggs.dog's dreamcast/nv-gpu-operator (which targets
+# Talos + a shared/time-sliced RTX 5090). biggs-sz runs plain k3s on standard
+# Linux nodes (not Talos), so the driver/toolkit management model is
+# INVERTED from the source:
+#   - source (Talos):  driver.enabled=false, toolkit.enabled=false (Talos
+#     system extensions provide both; the operator cannot mutate the
+#     immutable Talos host).
+#   - biggs-sz (k3s):   driver.enabled=true, toolkit.enabled=true (nothing
+#     else on a standard k3s node provides the NVIDIA driver or container
+#     toolkit; the GPU Operator must manage both itself).
+#
+# nfd.enabled=false: biggs-sz already runs a standalone Node Feature Discovery
+# HelmRelease (kube-system/nfd, chart node-feature-discovery 0.18.1). Do NOT
+# let the GPU Operator install its own bundled NFD (that would run two NFD
+# masters fighting over the same node labels). This asks the operator's
+# gpu-feature-discovery subchart to attach to the EXISTING NFD instance
+# instead. VERIFY this compatibility against the live chart before un-drafting
+# (see ../ks.yaml TODO #3) -- it is asserted here from NVIDIA's documented
+# "existing NFD" deployment mode, not from a render test against 0.18.1.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: nvidia-gpu-operator
+  namespace: kube-system
+spec:
+  interval: 3m
+  chart:
+    spec:
+      chart: gpu-operator
+      # Same version the source biggs.dog cluster pins (v26.3.3). Re-verify
+      # current/latest at un-draft time; Renovate can take over afterward.
+      version: v26.3.3
+      sourceRef:
+        kind: HelmRepository
+        name: nvidia
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    nfd:
+      # See header note: use biggs-sz's existing standalone NFD, don't
+      # install a second one.
+      enabled: false
+    driver:
+      # k3s on standard Linux: the operator must install/manage the NVIDIA
+      # driver itself (unlike the source's Talos cluster). Confirm the target
+      # node's OS/kernel is compatible with the operator-managed driver
+      # container before enabling in production (Ubuntu/Debian standard
+      # kernels are well-supported; anything unusual needs a precompiled
+      # driver container check against NVIDIA's driver container matrix).
+      enabled: true
+    toolkit:
+      # k3s: the operator manages the NVIDIA Container Toolkit + configures
+      # containerd. Verify the k3s containerd config path
+      # (typically /var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl
+      # for k3s, NOT the vanilla /etc/containerd/config.toml the chart
+      # defaults assume) and set toolkit.env CONTAINERD_CONFIG /
+      # CONTAINERD_SOCKET accordingly if the chart defaults don't already
+      # detect k3s. THIS IS THE #1 THING TO VALIDATE AGAINST THE LIVE NODE.
+      enabled: true
+    operator:
+      defaultRuntime: containerd
+    # Time-slicing: copied from source as a STARTING POINT ONLY. The source
+    # cluster shares one GPU between vLLM and gaming sessions (needs 2+
+    # replicas). biggs-sz has no such multi-consumer use case yet -- DECIDE
+    # the right replica count (likely 1, i.e. no slicing, until a concrete
+    # need for GPU sharing exists) before un-drafting. Left disabled by
+    # default (devicePlugin.config.create: false) until that decision is made.
+    devicePlugin:
+      config:
+        create: false
+        name: time-slicing-config
+        default: time-slicing
+        data:
+          time-slicing: |-
+            version: v1
+            sharing:
+              timeSlicing:
+                resources:
+                  - name: nvidia.com/gpu
+                    replicas: 1
+    # NOTE: the source HelmRelease also configures a custom DCGM-exporter
+    # metric profile (Xid error alerting, clocks/temps/power/PCIe/DCP
+    # metrics) plus a companion VMRule + VMServiceScrape + Grafana dashboard
+    # (dreamcast/nv-gpu-operator/app/{vmrule,vmservicescrape,grafana-dashboard}.yaml
+    # in the source repo). NOT ported here -- intentionally deferred until
+    # the base operator install is verified working on real biggs-sz
+    # hardware. Port those four files once this HelmRelease is un-drafted and
+    # confirmed healthy; they were straightforward observability additions
+    # with no source-cluster-specific assumptions besides the metric names
+    # (double-check DCGM field names against the deployed exporter version).
