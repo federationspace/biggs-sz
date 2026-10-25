@@ -127,7 +127,7 @@ spec:
             limits:
               memory: 3Gi
             requests:
-              memory: 3Gi
+              memory: 768Mi
               cpu: "1.5"
       dnsPolicy: ClusterFirst
       restartPolicy: Always
