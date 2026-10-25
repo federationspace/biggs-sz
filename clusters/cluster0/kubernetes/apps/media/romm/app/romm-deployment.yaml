@@ -19,7 +19,7 @@ spec:
         # Pinned: romm runs its pending alembic migrations on every start, so a
         # floating tag turned a routine pod restart into an unreviewed schema
         # upgrade. Bump through a Renovate PR.
-        - image: rommapp/romm:5.4.0
+        - image: rommapp/romm:5.4.1
           imagePullPolicy: IfNotPresent
           name: romm
           env:
