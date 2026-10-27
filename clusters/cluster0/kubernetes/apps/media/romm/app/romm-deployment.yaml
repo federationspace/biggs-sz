@@ -7,6 +7,17 @@ metadata:
   namespace: media
 spec:
   replicas: 1
+  # No surge: all three volumes are RWO ceph-block, so a surge pod scheduled
+  # to a different node stalls on Multi-Attach until the old pod is deleted
+  # by hand. maxSurge 0 stops the old pod first, trading a short outage for
+  # a rollout that always completes. Not `type: Recreate`: Flux's server-side
+  # apply cannot clear the API-defaulted rollingUpdate block, so it rejects
+  # that change on this existing object.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: romm
@@ -15,6 +26,19 @@ spec:
       labels:
         app: romm
     spec:
+      # Soft preference only: keep romm off control-00 (control plane, NAS
+      # host, and home of the pinned *arr/sabnzbd pods) when a worker can
+      # take it, but still fall back to control-00 if no worker fits.
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values:
+                      - control-00
       containers:
         # Pinned: romm runs its pending alembic migrations on every start, so a
         # floating tag turned a routine pod restart into an unreviewed schema
