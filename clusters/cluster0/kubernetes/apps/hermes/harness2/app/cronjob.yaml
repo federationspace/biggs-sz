@@ -1,0 +1,101 @@
+---
+# Post-update self-test for the Hermes CLI and config contract the
+# harness2-hermes scaffold depends on (profile create --clone, chat
+# --query-file --format stream-json, profile delete). It runs the scaffold's
+# own scripts/smoke.sh: one real probe session that must write "OK".
+#
+# It runs in an emptyDir home, so it never touches harness2-data and never
+# contends for the workbench's RWO volume. Because no version marker survives
+# between runs, every run is a real probe.
+#
+# Keep the image tag in lockstep with deployment.yaml. After a Renovate
+# hermes-agent bump merges, run it on demand instead of waiting for Monday:
+#   kubectl -n hermes create job --from=cronjob/harness2-smoke smoke-$(date +%s)
+# A failure raises KubeJobFailed (VMRule), which routes to Matrix.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: harness2-smoke
+  namespace: hermes
+  labels:
+    app.kubernetes.io/name: harness2
+spec:
+  schedule: "0 7 * * 1"
+  timeZone: America/New_York
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 900
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: harness2-smoke
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsUser: 10000
+            runAsGroup: 10000
+            fsGroup: 10000
+          containers:
+            - name: smoke
+              image: docker.io/nousresearch/hermes-agent:v2026.9.24
+              imagePullPolicy: IfNotPresent
+              # Bypass the s6 /init entrypoint: a one-shot CLI run needs no
+              # supervisor, and the pod already starts as the hermes user.
+              command: ["/bin/bash", "-ec"]
+              args:
+                - |
+                  git clone -q https://github.com/shrinedogg/harness2-hermes /work/h2h
+                  cd /work/h2h
+                  git checkout -q --detach "$HARNESS2_HERMES_REF"
+                  # Upstream bug at 0ec326d: `hermes --version | head -1`
+                  # under pipefail exits 1 (head closes the pipe, Hermes dies
+                  # on BrokenPipeError), so smoke.sh logs "hermes CLI missing"
+                  # instead of the version. sed drains its input. Drop this
+                  # once upstream fixes it; the grep fails the run if the
+                  # line moved, so a stale patch cannot go unnoticed.
+                  sed -i 's/hermes --version 2>\/dev\/null | head -1/hermes --version 2>\/dev\/null | sed -n 1p/' scripts/smoke.sh
+                  grep -q 'hermes --version 2>/dev/null | sed -n 1p' scripts/smoke.sh
+                  mkdir -p "$HERMES_HOME"
+                  cp /seed/config.yaml "$HERMES_HOME/config.yaml"
+                  bash scripts/smoke.sh
+              env:
+                - name: HOME
+                  value: /work
+                - name: HERMES_HOME
+                  value: /work/hermes-home
+                # Same pin as deployment.yaml. Not Renovate-tracked.
+                - name: HARNESS2_HERMES_REF
+                  value: 0ec326d5251f7a458086116488cf38deaff17f93
+                - name: NOUS_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: hermes-secrets
+                      key: NOUS_API_KEY
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 512Mi
+                limits:
+                  memory: 2Gi
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: seed
+                  mountPath: /seed
+                  readOnly: true
+          volumes:
+            - name: work
+              emptyDir: {}
+            # The bot's model/provider wiring, same as the workbench.
+            - name: seed
+              configMap:
+                name: hermes-config
+                items:
+                  - key: config.yaml
+                    path: config.yaml
