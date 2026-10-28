@@ -6,3 +6,4 @@ resources:
   - ./namespace.yaml
   # Flux-Kustomizations
   - ./hermes/ks.yaml
+  - ./harness2/ks.yaml

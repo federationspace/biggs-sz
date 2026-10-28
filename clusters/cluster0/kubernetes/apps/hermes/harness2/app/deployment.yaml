@@ -1,0 +1,173 @@
+---
+# Dedicated identity with no API token: the workbench never talks to the
+# Kubernetes API.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: harness2
+  namespace: hermes
+  labels:
+    app.kubernetes.io/name: harness2
+automountServiceAccountToken: false
+---
+# Holds the harness2-hermes checkout (candidates/, runs/ trajectories, and the
+# improvement library/, the only long-term state) plus the throwaway probe
+# profiles under profiles/. Separate from hermes-data so probes, which run
+# unattended with a terminal tool, can never read or write the bot's memories,
+# sessions or .env (the scaffold copies $HERMES_HOME/.env into every probe).
+# The library lives only here; export it with kubectl cp.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: harness2-data
+  namespace: hermes
+  labels:
+    app.kubernetes.io/name: harness2
+spec:
+  storageClassName: ceph-block
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: harness2
+  namespace: hermes
+  labels:
+    app.kubernetes.io/name: harness2
+spec:
+  replicas: 1
+  # Single RWO volume: stop the old pod before starting the new one, or the
+  # surge pod stalls on Multi-Attach. Do not switch to type: Recreate; Flux's
+  # server-side apply rejects that on an existing object (rollingUpdate:
+  # Forbidden).
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: harness2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: harness2
+    spec:
+      serviceAccountName: harness2
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      # CPU-only (inference is the Nous Portal). Softly prefer non-GPU nodes,
+      # same as the bot; never a required GPU pin.
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 1
+              preference:
+                matchExpressions:
+                  - key: nvidia.com/gpu.present
+                    operator: NotIn
+                    values: ["true"]
+      # s6-overlay's /init (PID 1) starts as root, then drops every service
+      # to the hermes user (UID 10000), same as the bot, so no runAsNonRoot
+      # at pod level. fsGroup pre-owns the volume for UID 10000.
+      securityContext:
+        fsGroup: 10000
+      initContainers:
+        # Seeds config.yaml + SOUL.md on every boot (Git wins). Clones the
+        # scaffold ONCE at the pinned commit and never touches it again,
+        # because candidates/, runs/ and library/ are live state inside that
+        # checkout. Bumping HARNESS2_HERMES_REF here only affects a fresh
+        # volume; on the existing one, upgrade by hand (git fetch + checkout
+        # as the hermes user).
+        - name: seed
+          image: docker.io/nousresearch/hermes-agent:v2026.9.24
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-ec"]
+          args:
+            - |
+              cp /seed/config.yaml /data/config.yaml
+              cp /soul/SOUL.md /data/SOUL.md
+              if [ ! -d /data/harness2-hermes/.git ]; then
+                rm -rf /data/harness2-hermes
+                git clone https://github.com/shrinedogg/harness2-hermes /data/harness2-hermes
+                git -C /data/harness2-hermes checkout --detach "$HARNESS2_HERMES_REF"
+              fi
+              git -C /data/harness2-hermes log -1 --format='scaffold at %h %s'
+          env:
+            - name: HOME
+              value: /tmp
+            # Not Renovate-tracked. Bump by hand after reading the upstream diff.
+            - name: HARNESS2_HERMES_REF
+              value: 0ec326d5251f7a458086116488cf38deaff17f93
+          securityContext:
+            runAsUser: 10000
+            runAsGroup: 10000
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: seed
+              mountPath: /seed
+              readOnly: true
+            - name: soul
+              mountPath: /soul
+              readOnly: true
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      containers:
+        # No platform env and no dashboard (biggs.dog runs this scaffold on a
+        # laptop and has no in-cluster UI to copy). The gateway only keeps a
+        # Hermes home alive for kubectl-exec sessions and probe runs. Probe
+        # profiles register as s6 services in the DOWN state, so they never
+        # start extra gateways.
+        - name: harness2
+          image: docker.io/nousresearch/hermes-agent:v2026.9.24
+          imagePullPolicy: IfNotPresent
+          args: ["gateway", "run"]
+          env:
+            # Only the model key, read by providers.nous key_env in the shared
+            # config.yaml. Deliberately NOT envFrom hermes-secrets: that would
+            # hand unattended probes the bot's Matrix token and dashboard creds.
+            - name: NOUS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-secrets
+                  key: NOUS_API_KEY
+          resources:
+            requests:
+              cpu: 250m
+              memory: 768Mi
+            # Workbench plus one probe session at a time (run_probe.sh is
+            # sequential). Browser tools are the memory-hungry path.
+            limits:
+              memory: 3Gi
+          volumeMounts:
+            - name: data
+              mountPath: /opt/data
+            # Playwright needs shared memory.
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: seed
+          configMap:
+            name: hermes-config
+            items:
+              - key: config.yaml
+                path: config.yaml
+        - name: soul
+          configMap:
+            name: harness2-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: harness2-data
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi
