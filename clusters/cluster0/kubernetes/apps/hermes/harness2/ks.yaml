@@ -1,0 +1,27 @@
+---
+# Flux Kustomization for the Harness2 workbench: the harness2-hermes loop
+# (arXiv:2610.14224, github.com/shrinedogg/harness2-hermes) on its own Hermes
+# home. It shares the hermes namespace so it can mount the bot's hermes-config
+# ConfigMap and NOUS_API_KEY without a second ExternalSecret.
+#
+# No dependsOn: if the ConfigMap or Secret is missing, the pod just waits in
+# ContainerCreating until the hermes Kustomization delivers them.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app harness2
+  namespace: flux-system
+spec:
+  targetNamespace: hermes
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  path: ./clusters/cluster0/kubernetes/apps/hermes/harness2/app
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: false
+  interval: 30m
+  retryInterval: 1m
+  timeout: 5m

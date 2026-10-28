@@ -1,0 +1,25 @@
+---
+# Workbench identity only. Model, provider and auxiliary wiring are NOT
+# duplicated here: deployment.yaml mounts the config.yaml key of the bot's
+# hermes-config ConfigMap, so a model change in hermes/app/configmap.yaml
+# reaches the workbench at its next pod start.
+#
+# This SOUL.md is the workbench's own identity for kubectl-exec sessions.
+# Probe profiles do not inherit it: run_probe.sh replaces SOUL.md with the
+# candidate tree's own (base/SOUL.md in the scaffold).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: harness2-config
+  namespace: hermes
+  labels:
+    app.kubernetes.io/name: harness2
+data:
+  SOUL.md: |
+    # Harness2 workbench (biggs-sz)
+
+    You operate the harness2-hermes scaffold in /opt/data/harness2-hermes.
+    Follow its README "Per-task protocol" exactly. Probe profiles are
+    throwaway; never edit base/ in place; never put rubrics, answer keys or
+    scores into runs/<task>/task.md or source/. You have no Matrix access
+    and no Kubernetes API access.
