@@ -122,16 +122,26 @@ spec:
             limits:
               memory: 256Mi
       containers:
-        # No platform env and no dashboard (biggs.dog runs this scaffold on a
-        # laptop and has no in-cluster UI to copy). The gateway only keeps a
-        # Hermes home alive for kubectl-exec sessions and probe runs. Probe
+        # No chat platforms. The gateway keeps a Hermes home alive for probe
+        # runs and kubectl-exec sessions; s6 also supervises the web dashboard
+        # (HERMES_DASHBOARD=1), published at harness2.gregbob.net. Probe
         # profiles register as s6 services in the DOWN state, so they never
         # start extra gateways.
         - name: harness2
           image: docker.io/nousresearch/hermes-agent:v2026.9.24
           imagePullPolicy: IfNotPresent
           args: ["gateway", "run"]
+          # Dashboard basic-auth creds, from its OWN ExternalSecret (not the
+          # bot's). optional: true keeps the workbench running if the
+          # 1Password item is missing; the dashboard then fails closed
+          # (refuses to start on a non-loopback bind without auth).
+          envFrom:
+            - secretRef:
+                name: harness2-dashboard
+                optional: true
           env:
+            - name: HERMES_DASHBOARD
+              value: "1"
             # Only the model key, read by providers.nous key_env in the shared
             # config.yaml. Deliberately NOT envFrom hermes-secrets: that would
             # hand unattended probes the bot's Matrix token and dashboard creds.
@@ -140,6 +150,19 @@ spec:
                 secretKeyRef:
                   name: hermes-secrets
                   key: NOUS_API_KEY
+          ports:
+            - name: dashboard
+              containerPort: 9119
+              protocol: TCP
+          # Readiness only: gates the Service on the dashboard port. No
+          # liveness probe, so a missing login secret (dashboard fails closed)
+          # never restart-loops the workbench or interrupts a probe run.
+          readinessProbe:
+            tcpSocket:
+              port: dashboard
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
           resources:
             requests:
               cpu: 250m

@@ -69,8 +69,9 @@ kubernetes/apps/<ns>/<app>/
   `continuwuity` pins to `worker-01`.
 - **Hermes**: `hermes/hermes` is the Matrix bot (dashboard at
   `hermes.gregbob.net`). `hermes/harness2` is a separate Harness² workbench
-  with its own PVC and no Matrix token or route, by design; it shares only
-  the bot's `config.yaml` and `NOUS_API_KEY`. See `docs/runbooks/harness2.md`.
+  with its own PVC and dashboard (`harness2.gregbob.net`, own login) and no
+  Matrix token, by design; it shares only the bot's `config.yaml` and
+  `NOUS_API_KEY`. See `docs/runbooks/harness2.md`.
 - **StorageClasses**: `local-path` (k3s built-in, **default**, node-local SSD),
   `ceph-block` (Rook-Ceph RBD, replicated, node-independent),
   `nfs-storage` (`provisioner: nfs`, shared media volumes from the NAS).

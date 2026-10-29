@@ -1,0 +1,18 @@
+---
+# Web dashboard only; backend for httproute.yaml (harness2.gregbob.net).
+apiVersion: v1
+kind: Service
+metadata:
+  name: harness2
+  namespace: hermes
+  labels:
+    app.kubernetes.io/name: harness2
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: harness2
+  ports:
+    - name: dashboard
+      port: 9119
+      targetPort: dashboard
+      protocol: TCP
