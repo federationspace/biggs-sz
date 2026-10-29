@@ -1,0 +1,25 @@
+---
+# Harness2 workbench dashboard at harness2.gregbob.net, through the shared
+# gateway. Same protection model as the bot's hermes route: the dashboard's
+# own basic-auth login gate (it fails closed on a non-loopback bind when no
+# credentials are set), not a gateway bearer policy, which a browser cannot
+# satisfy. Credentials come from the harness2-dashboard ExternalSecret.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: harness2
+  namespace: hermes
+spec:
+  hostnames:
+    - harness2.gregbob.net
+  parentRefs:
+    - name: wildcard-gregbob-net
+      namespace: network
+  rules:
+    - backendRefs:
+        - name: harness2
+          port: 9119
+      # Agent turns and dashboard streams can run long.
+      timeouts:
+        request: 600s
+        backendRequest: 600s

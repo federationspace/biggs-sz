@@ -8,7 +8,7 @@ taught. Manifests: `clusters/cluster0/kubernetes/apps/hermes/harness2/`.
 
 | Object | Purpose |
 | --- | --- |
-| Deployment `harness2` | Hermes home at `/opt/data` on PVC `harness2-data` (ceph-block 10Gi). No chat platforms, no dashboard, no Service. |
+| Deployment `harness2` | Hermes home at `/opt/data` on PVC `harness2-data` (ceph-block 10Gi). No chat platforms. Web dashboard on port 9119, published at `harness2.gregbob.net` behind basic auth (ExternalSecret `harness2-dashboard`, 1Password item `harness2-dashboard`). |
 | `/opt/data/harness2-hermes` | The scaffold checkout, pinned at `0ec326d`. Holds `candidates/`, `runs/` and the improvement `library/`, the only long-term state. It lives on the PVC only. |
 | CronJob `harness2-smoke` | Mondays 07:00 America/New_York. Runs the scaffold's `smoke.sh` in an emptyDir home; failure raises `KubeJobFailed` to Matrix. |
 
@@ -17,6 +17,16 @@ key of `hermes-config` (model wiring) and `NOUS_API_KEY` from
 `hermes-secrets`. It never gets the bot's Matrix token or dashboard
 credentials, because the scaffold copies `$HERMES_HOME/.env` into every probe
 profile and probes run unattended with a terminal tool.
+
+## Dashboard
+
+`https://harness2.gregbob.net` (login from the 1Password item
+`harness2-dashboard`). It is a full Hermes dashboard on the workbench home:
+browse `runs/`, `candidates/` and `library/` with the file browser, read
+sessions, and chat. Dashboard chats run on the default profile with the
+shared free model (weak at Harness² judgement stages; see below), and they
+have a terminal tool on the workbench volume, so the checkout hygiene rule
+below applies to them too. The workbench has no Kubernetes API access.
 
 ## Getting a shell
 
