@@ -19,7 +19,7 @@ spec:
         # X.Y.Z-lsNNN build tag (the bare 5.1.3 alias is republished per build,
         # and the newest tags are unstable/nightly builds). Docker Hub rather
         # than lscr.io/ghcr.io, whose anonymous lookups 429 in Renovate.
-        - image: docker.io/linuxserver/sabnzbd:5.1.3-ls278
+        - image: docker.io/linuxserver/sabnzbd:5.1.3-ls279
           imagePullPolicy: Always
           name: sabnzbd
           env:
