@@ -72,6 +72,14 @@ spec:
               value: "1000"
             - name: PGID
               value: "1000"
+            # Since 0.9.2, startup.sh seeds a self-updating yt-dlp binary at
+            # $YTDLP_PATH (default /opt/pinepods/downloads/.bin/yt-dlp) and
+            # does the mkdir/cp as root, BEFORE dropping to PUID:PGID.
+            # Downloads is the root_squash NFS export, so root cannot create
+            # .bin there and the container exits. Keep the binary on the
+            # backups volume (ceph-block, persistent, root-writable) instead.
+            - name: YTDLP_PATH
+              value: "/opt/pinepods/backups/.bin/yt-dlp"
           envFrom:
             # DB_PASSWORD plus the first-boot admin account (USERNAME,
             # PASSWORD, EMAIL). FULLNAME is non-secret and set below.
