@@ -1,0 +1,20 @@
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: worldofpunchout
+  namespace: games
+spec:
+  hostnames:
+    - worldofpunchout.gregbob.net
+  parentRefs:
+    - name: wildcard-gregbob-net
+      namespace: network
+  rules:
+    - backendRefs:
+        - name: worldofpunchout
+          port: 80
+      matches:
+        - path:
+            type: PathPrefix
+            value: /

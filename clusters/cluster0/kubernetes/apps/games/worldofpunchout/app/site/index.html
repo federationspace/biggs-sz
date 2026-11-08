@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Knockout Kingdom</title>
+<meta name="description" content="An open-world arcade boxing adventure that runs in your browser.">
+<style>
+  html, body { margin: 0; height: 100%; background: #07070f; overflow: hidden; touch-action: none; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; image-rendering: pixelated; outline: none; }
+  #touch { display: none; position: fixed; inset: 0; pointer-events: none; }
+  @media (pointer: coarse) { #touch { display: block; } }
+  .tb { position: absolute; pointer-events: auto; width: 62px; height: 62px; border-radius: 50%;
+        background: rgba(255,255,255,.14); border: 2px solid rgba(255,255,255,.35); color: #fff;
+        font: bold 18px monospace; display: flex; align-items: center; justify-content: center;
+        user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  .tb.sm { width: 46px; height: 46px; font-size: 12px; }
+  .tb.on { background: rgba(255,216,74,.45); }
+</style>
+</head>
+<body>
+<canvas id="game" tabindex="0"></canvas>
+<div id="touch">
+  <div class="tb" data-k="up"    style="left:82px;bottom:148px">&#9650;</div>
+  <div class="tb" data-k="left"  style="left:14px;bottom:82px">&#9664;</div>
+  <div class="tb" data-k="right" style="left:150px;bottom:82px">&#9654;</div>
+  <div class="tb" data-k="down"  style="left:82px;bottom:16px">&#9660;</div>
+  <div class="tb" data-k="pl"    style="right:158px;bottom:28px">L</div>
+  <div class="tb" data-k="pr"    style="right:86px;bottom:94px">R</div>
+  <div class="tb" data-k="act"   style="right:14px;bottom:28px">A</div>
+  <div class="tb" data-k="star"  style="right:158px;bottom:108px">&#9733;</div>
+  <div class="tb" data-k="duck"  style="right:14px;bottom:108px">C</div>
+  <div class="tb sm" data-k="run"   style="left:14px;bottom:170px">RUN</div>
+  <div class="tb sm" data-k="menu"  style="right:14px;top:14px">&#8801;</div>
+  <div class="tb sm" data-k="map"   style="right:70px;top:14px">MAP</div>
+  <div class="tb sm" data-k="shake" style="right:126px;top:14px">Q</div>
+</div>
+<script src="game.js"></script>
+</body>
+</html>
