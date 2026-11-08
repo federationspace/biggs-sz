@@ -1,0 +1,20 @@
+---
+# This app needs an inner kustomization (unlike most apps here) for the
+# configMapGenerator: the static site in ./site is packed into a ConfigMap
+# whose name carries a content hash, so editing a file under ./site rolls the
+# Deployment automatically.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Required: the generated ConfigMap must share the Deployment's namespace,
+# otherwise kustomize does not rewrite the volume's reference to the hashed
+# name and the pod hangs in ContainerCreating ("configmap not found").
+namespace: games
+resources:
+  - deployment.yaml
+  - service.yaml
+  - route.yaml
+configMapGenerator:
+  - name: worldofpunchout-site
+    files:
+      - site/index.html
+      - site/game.js

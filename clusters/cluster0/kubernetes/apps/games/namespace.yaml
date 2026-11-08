@@ -1,0 +1,8 @@
+---
+# Everything under apps/games/ is self-contained. To remove it, delete this
+# directory in one PR; Flux prunes the Kustomizations, then this namespace and
+# everything in it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: games

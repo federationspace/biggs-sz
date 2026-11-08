@@ -60,6 +60,8 @@ clusters/cluster0/
     ├── cert-manager/            # cert-manager (ACME/DNS-01 issuers)
     ├── databases/                # cnpg (CloudNativePG)
     ├── external-secrets/         # external-secrets, onepassword-connect
+    ├── games/                     # worldofpunchout (static browser game; delete the
+    │                             # whole dir to remove the namespace)
     ├── git-system/                # gitea, act_runner
     ├── gregbob/                   # gregbob, personal site/services
     ├── hermes/                    # hermes (Matrix cluster assistant, hermes.gregbob.net)

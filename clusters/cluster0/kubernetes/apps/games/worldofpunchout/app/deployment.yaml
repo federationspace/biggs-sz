@@ -1,0 +1,60 @@
+---
+# Static browser game (HTML + canvas JS, no backend). Saves live in the
+# player's localStorage, so there is no volume and nothing to back up.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worldofpunchout
+  namespace: games
+  labels:
+    app: worldofpunchout
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worldofpunchout
+  template:
+    metadata:
+      labels:
+        app: worldofpunchout
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nginx
+          image: docker.io/nginxinc/nginx-unprivileged:1.31.7-alpine@sha256:b5047b9b76845eac124358373c6852377c52e4b05834a47647e955dd91cb8f1e
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: site
+              mountPath: /usr/share/nginx/html
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+      volumes:
+        - name: site
+          configMap:
+            name: worldofpunchout-site

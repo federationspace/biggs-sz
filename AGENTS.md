@@ -45,7 +45,10 @@ kubernetes/apps/<ns>/<app>/
   `path: ./clusters/cluster0/kubernetes/apps/<ns>/<app>/app/`, and
   `commonMetadata.labels.app.kubernetes.io/name: <app>`.
 - The `app/` directory holds raw manifests with **no inner
-  `kustomization.yaml`**; Flux builds the directory directly.
+  `kustomization.yaml`**; Flux builds the directory directly. Exceptions exist
+  where a generator is needed (e.g. `games/worldofpunchout` packs its static
+  site with a `configMapGenerator`); such a file must set `namespace:` so the
+  hashed ConfigMap name is rewritten into the Deployment.
 - Multi-stage apps put several Kustomizations in one `ks.yaml` with
   `dependsOn` for ordering (see `cert-manager`: chart first, then issuers).
 - The `<ns>/kustomization.yaml` lists each app's `ks.yaml`; add new apps there.

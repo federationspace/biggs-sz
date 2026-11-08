@@ -1,0 +1,15 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: worldofpunchout
+  namespace: games
+spec:
+  type: ClusterIP
+  selector:
+    app: worldofpunchout
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
