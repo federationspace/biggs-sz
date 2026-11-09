@@ -1,0 +1,92 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pocket-id
+  namespace: auth
+  labels:
+    app: pocket-id
+spec:
+  # Pocket ID allows only one instance per database.
+  replicas: 1
+  # Recreate is set at creation on purpose: two pods would share the DB during
+  # a rolling update. (Switching an EXISTING Deployment to Recreate is rejected
+  # by Flux's server-side apply; do not copy this onto a live object.)
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: pocket-id
+  template:
+    metadata:
+      labels:
+        app: pocket-id
+    spec:
+      # User namespace: the entrypoint starts as root to chown /app/data, then
+      # su-execs to 1000. Inside the user namespace that root maps to an
+      # unprivileged host UID.
+      hostUsers: false
+      containers:
+        - name: pocket-id
+          image: ghcr.io/pocket-id/pocket-id:v2.19.2
+          imagePullPolicy: IfNotPresent
+          env:
+            # Public URL; passkeys are bound to this domain, so changing it
+            # later forces every user to re-enroll.
+            - name: APP_URL
+              value: "https://id.gregbob.net"
+            # Only reachable through wildcard-gregbob-net (TLS ends there).
+            - name: TRUST_PROXY
+              value: "true"
+            # Uploads (logos, avatars) in Postgres; the pod stays stateless.
+            - name: FILE_BACKEND
+              value: "database"
+            - name: ANALYTICS_DISABLED
+              value: "true"
+            - name: VERSION_CHECK_DISABLED
+              value: "true"
+            - name: PORT
+              value: "1411"
+            # Application Configuration (session length, signups, email,
+            # passkey policy) is managed in the admin UI and stored in the
+            # database, so it is NOT set here. Env values for those settings
+            # are ignored unless UI_CONFIG_DISABLED=true.
+          # DB_CONNECTION_STRING, ENCRYPTION_KEY
+          envFrom:
+            - secretRef:
+                name: pocket-id
+          ports:
+            - name: http
+              containerPort: 1411
+              protocol: TCP
+          # Root start is required by the entrypoint (see hostUsers above), so
+          # no runAsNonRoot / drop ALL here.
+          securityContext:
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: 25m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          startupProbe:
+            exec:
+              command: ["/app/pocket-id", "healthcheck"]
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command: ["/app/pocket-id", "healthcheck"]
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["/app/pocket-id", "healthcheck"]
+            periodSeconds: 30
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+      volumes:
+        - name: data
+          emptyDir: {}

@@ -75,6 +75,13 @@ kubernetes/apps/<ns>/<app>/
   with its own PVC and dashboard (`harness2.gregbob.net`, own login) and no
   Matrix token, by design; it shares only the bot's `config.yaml` and
   `NOUS_API_KEY`. See `docs/runbooks/harness2.md`.
+- **Auth**: `auth/pocket-id` is the OIDC provider (`id.gregbob.net`,
+  passkey-only), backed by `cnpg-pocket-id`. Only infrastructure settings
+  (URL, DB, encryption key) are in the manifests; Application Configuration
+  (signups, session length, email) lives in the admin UI and the database. No
+  app is wired to it yet; each OIDC client gets its own PR. Lost admin
+  passkey: `kubectl -n auth exec deploy/pocket-id -- /app/pocket-id
+  one-time-access-token <user>` prints a one-hour login link.
 - **StorageClasses**: `local-path` (k3s built-in, **default**, node-local SSD),
   `ceph-block` (Rook-Ceph RBD, replicated, node-independent),
   `nfs-storage` (`provisioner: nfs`, shared media volumes from the NAS).
