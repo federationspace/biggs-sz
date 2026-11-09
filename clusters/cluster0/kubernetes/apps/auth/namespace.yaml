@@ -1,0 +1,8 @@
+---
+# Pocket ID (OIDC provider). Self-contained: deleting apps/auth/ in one PR
+# prunes the Kustomization, then this namespace. The database lives in
+# databases/cnpg (cnpg-pocket-id) and is removed separately.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: auth
