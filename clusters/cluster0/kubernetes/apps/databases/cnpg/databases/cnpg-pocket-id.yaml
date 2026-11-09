@@ -1,0 +1,31 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cnpg-pocket-id
+  namespace: cnpg-system
+spec:
+  instances: 3
+  # Required (not CNPG's default `preferred`): with local-path an instance is
+  # welded to the node it first lands on, and `preferred` let the older
+  # clusters stack two copies on control-00. A new cluster can start compliant.
+  # 4 nodes for 3 instances, so a drained node still leaves room.
+  affinity:
+    enablePodAntiAffinity: true
+    podAntiAffinityType: required
+  bootstrap:
+    initdb:
+      database: pocketid
+      owner: pocketid
+      dataChecksums: true
+      secret:
+        name: pocket-id-user-password
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  resources:
+    requests:
+      memory: 500Mi
+      cpu: 100m
+    limits:
+      memory: 500Mi
+  storage:
+    size: 5Gi
+    storageClass: local-path
