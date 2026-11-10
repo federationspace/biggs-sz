@@ -6,3 +6,4 @@ resources:
   - ./namespace.yaml
   # Flux-Kustomizations
   - ./pocket-id/ks.yaml
+  - ./oauth2-proxy/ks.yaml

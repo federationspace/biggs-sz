@@ -1,0 +1,85 @@
+---
+# Session store for oauth2-proxy. Disposable: no persistence, so a restart
+# signs everyone out once (Pocket ID then signs them straight back in).
+# Session values are encrypted by oauth2-proxy with a per-session key that
+# lives only in the browser's cookie, so the store alone reveals no tokens.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oauth2-proxy-valkey
+  namespace: auth
+  labels:
+    app: oauth2-proxy-valkey
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oauth2-proxy-valkey
+  template:
+    metadata:
+      labels:
+        app: oauth2-proxy-valkey
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: valkey
+          image: docker.io/valkey/valkey:9.0.7-alpine@sha256:2d04268dfa26ab31cfa3fdc538866e76438b2d00e41db41b8cb86d780ac5a416
+          imagePullPolicy: IfNotPresent
+          args:
+            - --save
+            - ""
+            - --appendonly
+            - "no"
+            - --maxmemory
+            - 48mb
+            # oauth2-proxy sets a TTL on every session key; evict those
+            # first rather than refusing writes.
+            - --maxmemory-policy
+            - volatile-lru
+          ports:
+            - name: valkey
+              containerPort: 6379
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 96Mi
+          readinessProbe:
+            tcpSocket:
+              port: valkey
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: valkey
+            periodSeconds: 30
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oauth2-proxy-valkey
+  namespace: auth
+spec:
+  type: ClusterIP
+  selector:
+    app: oauth2-proxy-valkey
+  ports:
+    - name: valkey
+      port: 6379
+      targetPort: valkey

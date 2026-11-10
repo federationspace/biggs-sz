@@ -22,3 +22,4 @@ resources:
   - agentgateway-oci.yaml
   - kube-prometheus-repo.yaml
   - amd-gpu-repo.yaml
+  - oauth2-proxy-repo.yaml
