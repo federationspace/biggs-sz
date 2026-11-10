@@ -1,0 +1,60 @@
+---
+# radiance.gregbob.net: Radiance's built-in dashboard (stats, graphs,
+# sessions, model settings) behind Pocket ID single sign-on.
+#
+# The gateway adds the engine key upstream (AgentgatewayBackend radiance), so
+# a signed-in browser needs no key; SSO is the ONLY guard on this hostname.
+# Hence the order: the ext-authz policy (radiance-dashboard-auth) exists
+# before the route (radiance-dashboard), and the route also waits for
+# oauth2-proxy to serve. Without the policy the route would hand the engine
+# to anyone on the internet (*.gregbob.net is a public wildcard).
+# extAuth itself fails closed: a missing or endpoint-less oauth2-proxy
+# Service answers 403 (verified live before this PR).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app radiance-dashboard-auth
+  namespace: flux-system
+spec:
+  dependsOn:
+    # The AgentgatewayPolicy CRD.
+    - name: agentgateway
+  targetNamespace: ai-system
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  path: ./clusters/cluster0/kubernetes/apps/ai-system/radiance-dashboard/auth
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  interval: 3m
+  retryInterval: 1m
+  timeout: 2m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app radiance-dashboard
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: radiance-dashboard-auth
+    # The sign-in service the policy calls.
+    - name: oauth2-proxy
+    # AgentgatewayBackend radiance (adds the engine key upstream).
+    - name: agentgateway-ai
+  targetNamespace: ai-system
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  path: ./clusters/cluster0/kubernetes/apps/ai-system/radiance-dashboard/route
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: false
+  interval: 3m
+  retryInterval: 1m
+  timeout: 2m

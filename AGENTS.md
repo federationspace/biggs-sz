@@ -115,10 +115,19 @@ kubernetes/apps/<ns>/<app>/
 - **Auth**: `auth/pocket-id` is the OIDC provider (`id.gregbob.net`,
   passkey-only), backed by `cnpg-pocket-id`. Only infrastructure settings
   (URL, DB, encryption key) are in the manifests; Application Configuration
-  (signups, session length, email) lives in the admin UI and the database. No
-  app is wired to it yet; each OIDC client gets its own PR. Lost admin
-  passkey: `kubectl -n auth exec deploy/pocket-id -- /app/pocket-id
+  (signups, session length, email) lives in the admin UI and the database.
+  Each OIDC client gets its own PR. Lost admin passkey: `kubectl -n auth exec deploy/pocket-id -- /app/pocket-id
   one-time-access-token <user>` prints a one-hour login link.
+- **SSO for apps without their own login**: `auth/oauth2-proxy` (Pocket ID
+  client `oauth2-proxy`, sign-in pages at `auth.gregbob.net`, one session
+  cookie for `.gregbob.net`, sessions in its own Valkey). To guard a route,
+  add an `AgentgatewayPolicy` with `traffic.extAuth` to Service
+  `auth/oauth2-proxy:80` path `/oauth2/auth` (copy
+  `ai-system/radiance-dashboard/auth/policy-sso.yaml`) and add the
+  namespace to `auth/oauth2-proxy/app/reference-grant.yaml`. extAuth fails
+  closed (403 when oauth2-proxy is missing or down), but a route without its
+  policy is open, so ship the policy in a Kustomization the route depends on.
+  Who may sign in is set in Pocket ID (the client's allowed user groups).
 - **StorageClasses**: `local-path` (k3s built-in, **default**, node-local SSD),
   `ceph-block` (Rook-Ceph RBD, replicated, node-independent),
   `nfs-storage` (`provisioner: nfs`, shared media volumes from the NAS).

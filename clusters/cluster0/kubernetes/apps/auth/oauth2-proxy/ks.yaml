@@ -1,0 +1,27 @@
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app oauth2-proxy
+  namespace: flux-system
+spec:
+  dependsOn:
+    # ClusterSecretStore (onepassword-connect) for the ExternalSecret.
+    - name: secretstore
+    # oauth2-proxy discovers the issuer (https://id.gregbob.net) at startup.
+    - name: pocket-id
+  targetNamespace: auth
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  path: ./clusters/cluster0/kubernetes/apps/auth/oauth2-proxy/app
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  # wait: true so the forward-auth routes (which depend on this) are created
+  # only once oauth2-proxy is actually serving.
+  wait: true
+  interval: 3m
+  retryInterval: 1m
+  timeout: 5m

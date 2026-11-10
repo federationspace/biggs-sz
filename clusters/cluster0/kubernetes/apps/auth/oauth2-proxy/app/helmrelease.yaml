@@ -1,0 +1,92 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+# oauth2-proxy as a forward-auth (ext-authz) service: agentgateway asks it
+# /oauth2/auth for every request on an SSO-guarded route, and it signs users
+# in with Pocket ID. Ported from biggs.dog cluster1 (auth/oauth2-proxy).
+# To guard another app: an AgentgatewayPolicy with traffic.extAuth pointing
+# at this Service (see ai-system/radiance-dashboard/auth/), plus its
+# namespace in reference-grant.yaml.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: oauth2-proxy
+  namespace: auth
+spec:
+  interval: 3m
+  chart:
+    spec:
+      chart: oauth2-proxy
+      version: 10.7.3
+      sourceRef:
+        kind: HelmRepository
+        name: oauth2-proxy
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    image:
+      # quay.io/oauth2-proxy/oauth2-proxy, the chart's appVersion, digest
+      # pinned (multi-arch index).
+      tag: v7.15.6@sha256:c3415e8660af553f5e18f5d90db050614c02493c0ac6260ac59442f6d9b12048
+    # client-id / client-secret / cookie-secret come from the oauth2-proxy
+    # ExternalSecret (1Password item oauth2-proxy).
+    config:
+      existingSecret: oauth2-proxy
+      configFile: |-
+        provider = "oidc"
+        provider_display_name = "Pocket ID"
+        # Reached through the public name (pods resolve it via Cloudflare to
+        # the gateway), because the issuer in the discovery document must
+        # match exactly; the in-cluster Service URL would not.
+        oidc_issuer_url = "https://id.gregbob.net"
+        redirect_url = "https://auth.gregbob.net/oauth2/callback"
+        # Auth-only: answer the gateway's /oauth2/auth subrequest (202 when
+        # signed in) instead of proxying an upstream.
+        upstreams = ["static://202"]
+        # Who may sign in is decided in Pocket ID (the client's allowed user
+        # groups); every account it vouches for is accepted here.
+        email_domains = ["*"]
+        scope = "openid email profile groups"
+        code_challenge_method = "S256"
+        # Straight to Pocket ID, no intermediate "Sign in with" page.
+        skip_provider_button = true
+        # Behind agentgateway (TLS terminated there). Only the pod network
+        # (k3s cluster-cidr) may set X-Forwarded-*, so direct callers cannot
+        # spoof them.
+        reverse_proxy = true
+        trusted_proxy_ips = ["10.42.0.0/16"]
+        # One session cookie for every *.gregbob.net app it guards.
+        cookie_domains = [".gregbob.net"]
+        whitelist_domains = [".gregbob.net"]
+        cookie_secure = true
+        cookie_samesite = "lax"
+        # Identity for guarded upstreams via X-Auth-Request-* headers.
+        set_xauthrequest = true
+    # Redis-protocol session store (oauth2-proxy-valkey in this app): the
+    # browser cookie stays a small ticket. A cookie session holding the
+    # tokens is several KB, which broke the gateway's ext-authz subrequest
+    # in biggs.dog (forward-auth redirect loop).
+    sessionStorage:
+      type: redis
+      redis:
+        clientType: standalone
+        standalone:
+          connectionUrl: redis://oauth2-proxy-valkey.auth.svc.cluster.local:6379
+    # The chart's waitForRedis init container only works with its bundled
+    # redis subchart.
+    initContainers:
+      waitForRedis:
+        enabled: false
+    podDisruptionBudget:
+      enabled: false
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
