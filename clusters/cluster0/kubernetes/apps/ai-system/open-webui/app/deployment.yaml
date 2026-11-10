@@ -1,0 +1,173 @@
+---
+# Open WebUI: the chat front end for the local model, at chat.gregbob.net.
+# Sign-in is Pocket ID only. Talks to Radiance in-cluster with the engine
+# key; Radiance serves whatever model is loaded under the id "local".
+#
+# Who owns which setting (Open WebUI's own split):
+#   - OAuth (client, issuer, redirect) and the auth switches below are read
+#     from this manifest on EVERY start (ENABLE_OAUTH_PERSISTENT_CONFIG off).
+#   - Everything else (connections, default model, UI options) is seeded
+#     from env on the FIRST start only, then owned by Admin Settings in the
+#     UI and stored in the database; editing those env vars later does
+#     nothing.
+#
+# First admin: the first account created becomes admin. Password signup and
+# login are off from the first start (ENABLE_LOGIN_FORM=false makes the
+# empty-database signup endpoint answer 403; verified live), so that account
+# can only come from a Pocket ID sign-in. Later Pocket ID users arrive as
+# "pending" until the admin approves them.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open-webui
+  namespace: ai-system
+  labels:
+    app: open-webui
+spec:
+  replicas: 1
+  # SQLite on an RWO volume: never two pods. New object, so Recreate is
+  # accepted (switching an existing Deployment to it is rejected by
+  # server-side apply; do not copy this onto a live object).
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: open-webui
+  template:
+    metadata:
+      labels:
+        app: open-webui
+    spec:
+      # Non-root: the image is built so arbitrary uids with gid 0 can update
+      # its static assets at startup; all caches and data live on the volume.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 0
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: open-webui
+          # ghcr.io/open-webui/open-webui v0.13.3-slim (multi-arch index).
+          # Slim skips the baked-in embedding/whisper models; those live under
+          # the data volume (HF_HOME etc.), which hides the baked copies
+          # anyway, so they download there on first use.
+          image: ghcr.io/open-webui/open-webui:v0.13.3-slim@sha256:8faf917243afee55e042b10ddc08ed6ae6fa9c62522c7e14d81e7cf2922325ae
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: WEBUI_URL
+              value: https://chat.gregbob.net
+            - name: HOME
+              value: /app/backend/data
+            # Same-origin only (the default is "*").
+            - name: CORS_ALLOW_ORIGIN
+              value: https://chat.gregbob.net
+            # --- Sign-in: Pocket ID only ---
+            - name: ENABLE_OAUTH_PERSISTENT_CONFIG
+              value: "false"
+            - name: OAUTH_PROVIDER_NAME
+              value: Pocket ID
+            - name: OPENID_PROVIDER_URL
+              value: https://id.gregbob.net/.well-known/openid-configuration
+            # Pinned, so the callback never depends on how the app infers
+            # scheme/host behind the gateway. Must match the Pocket ID client.
+            - name: OPENID_REDIRECT_URI
+              value: https://chat.gregbob.net/oauth/oidc/login/callback
+            - name: OAUTH_SCOPES
+              value: openid email profile
+            - name: OAUTH_CODE_CHALLENGE_METHOD
+              value: S256
+            - name: ENABLE_OAUTH_SIGNUP
+              value: "true"
+            - name: OAUTH_MERGE_ACCOUNTS_BY_EMAIL
+              value: "false"
+            - name: ENABLE_LOGIN_FORM
+              value: "false"
+            - name: ENABLE_PASSWORD_AUTH
+              value: "false"
+            - name: ENABLE_SIGNUP
+              value: "false"
+            - name: DEFAULT_USER_ROLE
+              value: pending
+            - name: WEBUI_SESSION_COOKIE_SECURE
+              value: "true"
+            - name: WEBUI_AUTH_COOKIE_SECURE
+              value: "true"
+            - name: OAUTH_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: open-webui-secrets
+                  key: OAUTH_CLIENT_ID
+            - name: OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: open-webui-secrets
+                  key: OAUTH_CLIENT_SECRET
+            - name: WEBUI_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: open-webui-secrets
+                  key: WEBUI_SECRET_KEY
+            # --- Model connection (first-start seed, then UI-owned) ---
+            - name: ENABLE_OLLAMA_API
+              value: "false"
+            - name: OPENAI_API_BASE_URL
+              value: http://radiance.ai-system.svc.cluster.local:8000/v1
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: open-webui-secrets
+                  key: OPENAI_API_KEY
+            - name: DEFAULT_MODELS
+              value: local
+            # --- No phoning home ---
+            - name: ENABLE_COMMUNITY_SHARING
+              value: "false"
+            - name: ENABLE_VERSION_UPDATE_CHECK
+              value: "false"
+            - name: ANONYMIZED_TELEMETRY
+              value: "false"
+            - name: SCARF_NO_ANALYTICS
+              value: "true"
+            - name: DO_NOT_TRACK
+              value: "true"
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 1Gi
+            limits:
+              memory: 3Gi
+          # First start runs the database migrations and can take minutes.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            failureThreshold: 4
+          volumeMounts:
+            - name: data
+              mountPath: /app/backend/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: open-webui-data

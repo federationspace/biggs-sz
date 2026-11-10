@@ -1,0 +1,29 @@
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app open-webui
+  namespace: flux-system
+spec:
+  dependsOn:
+    # ClusterSecretStore for the ExternalSecret.
+    - name: secretstore
+    # The OIDC provider for sign-in (https://id.gregbob.net).
+    - name: pocket-id
+    # The model it chats with (radiance.ai-system.svc:8000).
+    - name: radiance
+  targetNamespace: ai-system
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  path: ./clusters/cluster0/kubernetes/apps/ai-system/open-webui/app
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  # The image is large (first pull takes minutes); do not hold the
+  # Kustomization on it.
+  wait: false
+  interval: 3m
+  retryInterval: 1m
+  timeout: 2m

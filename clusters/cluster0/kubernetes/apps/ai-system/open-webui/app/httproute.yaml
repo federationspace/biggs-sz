@@ -1,0 +1,24 @@
+---
+# chat.gregbob.net -> Open WebUI. No gateway auth policy: the app itself
+# allows sign-in only through Pocket ID (password login and signup are off,
+# see the Deployment), and *.gregbob.net is a public wildcard. No request
+# timeout: the UI streams over a long-lived websocket (socket.io).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: open-webui
+  namespace: ai-system
+spec:
+  hostnames:
+    - chat.gregbob.net
+  parentRefs:
+    - name: wildcard-gregbob-net
+      namespace: network
+  rules:
+    - backendRefs:
+        - name: open-webui
+          port: 8080
+      matches:
+        - path:
+            type: PathPrefix
+            value: /
