@@ -38,12 +38,18 @@ spec:
       # Next (one follow-up PR): StillDeadcode/qwen3.8-27b-mxfp4 @
       # 60bd4139f335205fbc120e5534329c30b691af0e, max-model-len 200000,
       # gpu-headroom 96, max-num-batched-tokens 2048.
-      RADIANCE_MODEL: StillDeadcode/minicpm5-2b-fp8
-      RADIANCE_MODEL_REVISION: 2b60d4c417c0b0a06429f197f6b9eebcc6beab72
-      RADIANCE_SERVED_NAME: local
-      RADIANCE_TP: "2"
-      RADIANCE_MAX_NUM_SEQS: "32"
-      RADIANCE_MAX_MODEL_LEN: "131072"
-      RADIANCE_KV_CACHE_DTYPE: fp8
-      RADIANCE_GPU_HEADROOM_MIB: "160"
-      RADIANCE_MAX_NUM_BATCHED_TOKENS: "512"
+      #
+      # Every value carries its own double quotes ('"..."'). Flux substitutes
+      # AFTER kustomize has re-serialized the manifests, and kustomize writes
+      # the "${VAR}" placeholders out unquoted, so a bare 2 would land as an
+      # integer and container args must be strings (the apply is rejected).
+      # Keep the inner quotes on every value, numbers and hex revisions alike.
+      RADIANCE_MODEL: '"StillDeadcode/minicpm5-2b-fp8"'
+      RADIANCE_MODEL_REVISION: '"2b60d4c417c0b0a06429f197f6b9eebcc6beab72"'
+      RADIANCE_SERVED_NAME: '"local"'
+      RADIANCE_TP: '"2"'
+      RADIANCE_MAX_NUM_SEQS: '"32"'
+      RADIANCE_MAX_MODEL_LEN: '"131072"'
+      RADIANCE_KV_CACHE_DTYPE: '"fp8"'
+      RADIANCE_GPU_HEADROOM_MIB: '"160"'
+      RADIANCE_MAX_NUM_BATCHED_TOKENS: '"512"'
