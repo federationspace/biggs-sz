@@ -89,7 +89,10 @@ kubernetes/apps/<ns>/<app>/
 - **Local LLM**: `ai-system/radiance` runs the Radiance engine on both R9700s
   (TP=2), OpenAI-compatible on `radiance.ai-system.svc:8000` (engine key from
   1Password `radiance`). The model is the `postBuild.substitute` block in
-  `ai-system/radiance/ks.yaml`; clients always ask for model `local`. The
+  `ai-system/radiance/ks.yaml`; clients always ask for model `local`. Every
+  substitute value keeps inner quotes (`'"2"'`): Flux substitutes after
+  kustomize re-serializes, so a bare number lands as an integer and the
+  Deployment apply is rejected (args must be strings). The
   engine's argv parser matches flags exactly and rejects unknown ones: one list
   item per flag and per value, never `--flag=value`. Public ingress is
   `llm.gregbob.net` via agentgateway (`ai-system/agentgateway-ai`), guarded by
