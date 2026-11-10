@@ -1,0 +1,17 @@
+---
+# Model cache on ai-00's NVMe (local-path binds to the node of the first pod,
+# which is pinned to ai-00). Holds the current .rad plus a few alternates
+# (default Qwen3.8-27B MXFP4 is 18 GiB, the largest menu model 43 GiB).
+# local-path does not enforce the size; watch node_filesystem_avail_bytes.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: radiance-models
+  namespace: ai-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 150Gi

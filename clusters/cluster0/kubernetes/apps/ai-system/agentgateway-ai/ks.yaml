@@ -1,0 +1,60 @@
+---
+# Secrets first, health-gated: on this agentgateway version an
+# apiKeyAuthentication policy whose Secret is missing is dropped from xDS, so
+# the route would serve UNAUTHENTICATED (biggs.dog issue #704), and
+# *.gregbob.net is a public wildcard. agentgateway-ai (the route) therefore
+# depends on this Kustomization, which is Ready only once both ExternalSecrets
+# report Ready=True.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app agentgateway-ai-secrets
+  namespace: flux-system
+spec:
+  dependsOn:
+    # ClusterSecretStore (onepassword-connect) for the ExternalSecrets.
+    - name: secretstore
+  targetNamespace: ai-system
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  path: ./clusters/cluster0/kubernetes/apps/ai-system/agentgateway-ai/secrets
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  healthCheckExprs:
+    - apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      current: has(status.conditions) && status.conditions.exists(e, e.type == 'Ready' && e.status == 'True')
+  interval: 3m
+  retryInterval: 1m
+  timeout: 2m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app agentgateway-ai
+  namespace: flux-system
+spec:
+  dependsOn:
+    # agentgateway controller/data plane + the AgentgatewayBackend/Policy CRDs.
+    - name: agentgateway
+    # Both Secrets synced before the route exists (see above).
+    - name: agentgateway-ai-secrets
+    # The radiance Service the backend dials.
+    - name: radiance
+  targetNamespace: ai-system
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  path: ./clusters/cluster0/kubernetes/apps/ai-system/agentgateway-ai/app
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: false
+  interval: 3m
+  retryInterval: 1m
+  timeout: 2m

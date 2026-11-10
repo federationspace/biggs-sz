@@ -1,0 +1,28 @@
+---
+# Strict client-token auth for the llm route: requests must carry
+# "Authorization: Bearer <token>" (location omitted = that header). Tokens
+# live in radiance-model-api-keys (agentgateway-ai/secrets), which the
+# Kustomization ordering guarantees exists before this route does.
+#
+# The rate limit bounds VRAM saturation of the one local model (no spend
+# risk); it is per proxy replica, not global. Tunable.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: llm-api-key
+  namespace: ai-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: llm
+  traffic:
+    apiKeyAuthentication:
+      mode: Strict
+      secretRef:
+        name: radiance-model-api-keys
+    rateLimit:
+      local:
+        - requests: 60
+          unit: Minutes
+          burst: 20

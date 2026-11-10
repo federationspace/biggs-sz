@@ -84,7 +84,19 @@ kubernetes/apps/<ns>/<app>/
     between boots, so never key anything on them.
   - Per-card VRAM is `node_drm_memory_vram_{size,used}_bytes` (node-exporter
     `--collector.drm`). It includes the 512 MiB iGPU; filter the R9700s by
-    size (`> 16e9`), not by card name.
+    size (`> 16e9`), not by card name. The series carry no `node` label;
+    select ai-00 with `instance="192.168.2.90:9100"`.
+- **Local LLM**: `ai-system/radiance` runs the Radiance engine on both R9700s
+  (TP=2), OpenAI-compatible on `radiance.ai-system.svc:8000` (engine key from
+  1Password `radiance`). The model is the `postBuild.substitute` block in
+  `ai-system/radiance/ks.yaml`; clients always ask for model `local`. The
+  engine's argv parser matches flags exactly and rejects unknown ones: one list
+  item per flag and per value, never `--flag=value`. Public ingress is
+  `llm.gregbob.net` via agentgateway (`ai-system/agentgateway-ai`), guarded by
+  the `llm-api-key` client-token policy (1Password `radiance-model-api-key`).
+  Its Secrets live in a separate, health-gated Kustomization the route depends
+  on, because the policy fails open while its Secret is missing and
+  `*.gregbob.net` is a public wildcard.
 - The control plane hosts media pods on purpose: downloads stage on the
   node's local SSD, then move to the ZFS pool locally instead of over the
   1Gbps network. Most `*arr` apps and `sabnzbd` pin to `control-00`;
