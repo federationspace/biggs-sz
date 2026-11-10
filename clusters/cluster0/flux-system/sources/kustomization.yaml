@@ -21,3 +21,4 @@ resources:
   - agentgateway-crds-oci.yaml
   - agentgateway-oci.yaml
   - kube-prometheus-repo.yaml
+  - amd-gpu-repo.yaml

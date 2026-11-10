@@ -13,3 +13,10 @@ spec:
         kind: HelmRepository
         name: node-feature-discovery
         namespace: flux-system
+  values:
+    worker:
+      # Let the NFD worker label the tainted GPU node ai-00 too.
+      tolerations:
+        - key: amd.com/gpu
+          operator: Exists
+          effect: NoSchedule

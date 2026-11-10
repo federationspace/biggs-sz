@@ -340,6 +340,16 @@ Get the token from control-00:
 ssh 192.168.2.164 'sudo cat /var/lib/rancher/k3s/server/node-token'
 ```
 
+**Taints and labels go in `/etc/rancher/k3s/config.yaml` BEFORE the
+installer runs.** k3s applies `node-label` and `node-taint` only when the node
+first registers; writing the file afterwards changes nothing until the node is
+deleted and rejoined. Plain workers need no file. A dedicated node (the GPU
+node, section 12) does, so check it is there before running `install.sh`:
+
+```sh
+cat /etc/rancher/k3s/config.yaml    # must exist and show node-label / node-taint
+```
+
 On the new node, **pin the version to the fleet's version**. The install script
 otherwise fetches the current stable channel, which can land you on an agent
 newer than the server; that is unsupported and skew will bite silently.
@@ -366,6 +376,13 @@ kubectl get nodes -o wide
 kubectl get pods -A -o wide --field-selector spec.nodeName=$NODE
 ```
 
+For a tainted node, confirm the taint registered before anything else
+schedules there:
+
+```sh
+kubectl get node $NODE -o jsonpath='{.spec.taints}{"\n"}{.metadata.labels}'
+```
+
 Expect the DaemonSets to land on their own: `cilium`, `cilium-envoy`,
 `node-feature-discovery` worker, `intel-gpu-plugin`, the Rook discover pod, and
 the metrics/logs collectors. Nothing needs to be applied by hand.
@@ -381,6 +398,9 @@ kubectl get node $NODE -o jsonpath='{.status.capacity}' | jq
 ---
 
 ## 8. Add the Ceph OSD
+
+**Skip this section for nodes that are not Ceph hosts** (the GPU node `ai-00`
+has no OSD and runs only `local-path` volumes; section 12).
 
 Identify the OSD disk **by id**, on the node:
 
@@ -510,6 +530,75 @@ shutdown behaviour of.
 
 ---
 
+## 12. GPU node deltas (ai-00)
+
+`ai-00` is a dedicated GPU node: 2x Radeon AI PRO R9700 32 GB on an ASUS
+ProArt B850-CREATOR WIFI NEO with a Ryzen 7500X3D, everything on one
+1 TB NVMe (`local-path` only, no Ceph OSD). Steps that differ from a worker:
+
+**Hardware and BIOS**
+- Cards in the two CPU slots, `PCIEX16(G5)_1` + `PCIEX16(G5)_2` (x8/x8 Gen5).
+  Leave `M.2_2` empty: a drive there drops the second slot to x4. Each card on
+  its own native 12V-2x6 cable, latched at both ends; a loose one gives a
+  stuck white VGA Q-LED and no video.
+- BIOS: EXPO, Above 4G Decoding, Resizable BAR, IOMMU on; CSM off; Restore AC
+  Power Loss [Power On], ErP [Disabled]. `PCIEX16 Link Mode` [Auto]: the
+  board auto-downgrades to Gen3 after a boot with a loose card and keeps it
+  until reset. If it recurs, reseat, then pin [GEN 4].
+- The iGPU stays **on**: the console HDMI is the board's. The cluster keeps
+  it out of GPU workloads by resource name (AGENTS.md, GPU node).
+
+**OS**
+- The RTL8126 5 GbE NICs need kernel >= 6.9: boot the ISO's GRUB entry
+  "Ubuntu Server with the HWE kernel", or the installer finds no network.
+- The guided LVM layout caps `ubuntu-lv` at ~100 GB; grow it to the whole disk
+  in the installer (local-path volumes live on `/`).
+- `uinput` is built into the HWE kernel (`CONFIG_INPUT_UINPUT=y`), so it never
+  shows in `lsmod`; `ls -l /dev/uinput` is the check.
+- Kernel arg `amdgpu.runpm=0` (`/etc/default/grub.d/99-amdgpu-runpm.cfg`,
+  then `update-grub`) keeps idle cards in D0 so their blowers stay quiet.
+- Ubuntu's `linux-firmware-amd-graphics` points `dcn_4_0_1_dmcub.bin` at the
+  DCN 3.2 blob, so the R9700 display engines fail (`LOAD_IP_FW ... 0x11`,
+  DMCUB errors). Compute is unaffected. Fix: the upstream linux-firmware
+  `amdgpu/dcn_4_0_1_dmcub.bin` in `/lib/firmware/updates/amdgpu/`, then
+  `update-initramfs -u` and reboot; the boot log should show `DMUB hardware
+  initialized: version=0x0A005000`. **Run host commands on the right box**:
+  check `hostname` first, because a reboot of `control-00` takes down the API
+  server and the NAS.
+- `LimitMEMLOCK=infinity` for containers: a drop-in on the kubelet's unit
+  (`/etc/systemd/system/k3s-agent.service.d/memlock.conf`), not
+  `limits.conf`, which only affects login sessions. Verify on the running
+  agent: `grep 'locked memory' /proc/$(pgrep -xo k3s-agent || pgrep -o k3s)/limits`.
+
+**Join** (section 7), with this written first:
+
+```yaml
+# /etc/rancher/k3s/config.yaml
+node-label:
+  - biggs.sz/role=ai
+node-taint:
+  - amd.com/gpu=present:NoSchedule
+```
+
+Then 6a/6b as for any node, and skip section 8.
+
+**Verify** (after the GPU platform manifests reconcile):
+
+```sh
+kubectl get node ai-00 -o jsonpath='{.status.allocatable}' | tr , '\n' | grep -E 'amd.com|squat.ai'
+#   amd.com/gpu-ai-pro-r9700 "2", amd.com/gpu "1" (iGPU, unused),
+#   squat.ai/uinput "16", squat.ai/r9700-a "8", squat.ai/r9700-b "8"
+for p in 00:01.1 00:01.3; do cat /sys/bus/pci/devices/0000:$p/max_link_speed; done   # 32.0 GT/s
+ls -l /dev/dri/by-path/    # 03:00.0 and 07:00.0 are the R9700s, 10:00.0 the iGPU
+```
+
+The cards drop their link to 2.5 GT/s at idle (PCIe DPM, `pp_dpm_pcie`);
+that is power saving, not a downgrade. Check `max_link_speed` on the root
+ports, not the cards' own `current_link_*`, which report the link inside the
+card.
+
+---
+
 ## Known traps
 
 | Symptom | Cause | Fix |
@@ -521,6 +610,8 @@ shutdown behaviour of.
 | Pods stuck `Terminating` forever | node deleted before its PVCs | `--force --grace-period=0`, then delete the PVCs |
 | Ceph stuck undersized after join | pool size 3, `failureDomain: host` | you need three OSD *hosts*; a second OSD on one host will not satisfy it |
 | Shutdown hangs in `systemd-shutdown` | section 6 skipped | apply 6a and 6b, verify with `busctl` |
+| Dedicated node joined with no taint, and rook / intel-gpu-plugin pods landed on it | `/etc/rancher/k3s/config.yaml` written after `install.sh` (k3s reads `node-taint`/`node-label` only at first registration) | `kubectl label` + `kubectl taint` the node, delete the pods that should not be there (DaemonSets do not re-create them under a NoSchedule taint), and keep the file so a re-registration gets them |
+| Leftover `ContainerStatusUnknown` / `Error` pods after a node reboot | kubelet graceful shutdown rejects and terminates pods; their objects stay `Failed` | check each owner has a healthy replacement, then `kubectl delete pods -A --field-selector spec.nodeName=<n>,status.phase=Failed` |
 | `/dev/dri` missing | GA kernel too old for the iGPU | install `linux-generic-hwe-24.04` |
 | `card0` present but `renderD128` missing | same, partial support: the driver binds but exposes no render node, so there is no hardware transcoding | install the HWE kernel and reboot; verify with `ls /dev/dri` |
 | GPU workloads will not schedule on a new node although the plugin is `Running` and the node is labelled | **the advertised resource name follows the kernel driver.** Newer Intel iGPUs (Lunar Lake and later) use `xe` and advertise `gpu.intel.com/xe`; older ones use `i915` and advertise `gpu.intel.com/i915`. A pod requesting one will never schedule on a node offering the other. | check with the command below, then reconcile the resource name across the fleet before assuming the GPU is broken |

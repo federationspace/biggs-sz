@@ -1,0 +1,79 @@
+---
+# ROCm device plugin + node labeller for ai-00 (2x Radeon AI PRO R9700).
+#
+# ai-00 keeps its Raphael iGPU enabled because the monitor is on the board's
+# HDMI. The iGPU is a real ROCm/KFD device (gfx1036), so under the plugin's
+# default `single` naming the node would offer amd.com/gpu: 3 and a 2-GPU
+# request could land on iGPU + one R9700. The `product` naming strategy
+# names each GPU from amdgpu.ids (PCI device + revision id):
+#   7551:C0 "AMD Radeon AI PRO R9700" -> amd.com/gpu-ai-pro-r9700   (x2)
+#   164E:CB (Raphael, not in the table) -> amd.com/gpu               (x1, unused)
+# GPU workloads request amd.com/gpu-ai-pro-r9700 only. `product` naming
+# first shipped in plugin 1.31.0.12; chart 0.22.0 defaults to 1.31.0.9.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: amd-gpu-device-plugin
+  namespace: kube-system
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: amd-gpu
+      version: 0.22.0
+      sourceRef:
+        kind: HelmRepository
+        name: amd-gpu
+        namespace: flux-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      strategy: rollback
+      retries: 3
+  values:
+    # The chart has no top-level `nodeSelector`; an unknown key is silently
+    # ignored and the DaemonSets would land on every node. This pair is the
+    # chart's own switch. Helm merges maps, so the chart's default selector
+    # keys are kept unless nulled: drop its NFD PCI label so the plugin does
+    # not wait on NFD having labelled the node.
+    node_selector_enabled: true
+    node_selector:
+      kubernetes.io/hostname: ai-00
+      feature.node.kubernetes.io/pci-0300_1002.present: null
+    tolerations:
+      - key: amd.com/gpu
+        operator: Exists
+        effect: NoSchedule
+    dp:
+      image:
+        # Single-arch (linux/amd64) image, so this is the platform manifest.
+        tag: "1.31.0.12@sha256:6437c74f6566e5d11c20c42369fca7194315943aea91f7bd6c98de1b19caf117"
+    labeller:
+      enabled: true
+    lbl:
+      image:
+        tag: "labeller-1.31.0.12@sha256:c7a7a8634b0a29f230e923858c4bd8c670446d6ae3f1f4f60a96fcd26632c6c3"
+  # The chart does not template device-plugin args. The image has no
+  # ENTRYPOINT, only CMD ["./k8s-device-plugin", "-logtostderr=true",
+  # "-stderrthreshold=INFO", "-v=5"] with WORKDIR /root/, so `args` alone
+  # would replace the binary too: set command and restate the defaults.
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: DaemonSet
+              name: amd-gpu-device-plugin-daemonset
+            patch: |
+              - op: add
+                path: /spec/template/spec/containers/0/command
+                value: ["./k8s-device-plugin"]
+              - op: add
+                path: /spec/template/spec/containers/0/args
+                value:
+                  - -logtostderr=true
+                  - -stderrthreshold=INFO
+                  - -v=5
+                  - -resource_naming_strategy=product
