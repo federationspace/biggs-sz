@@ -8,3 +8,5 @@ resources:
   - ./snapshot-controller/ks.yaml
   - ./volsync/ks.yaml
   - ./cilium/ks.yaml
+  - ./amd-gpu-device-plugin/ks.yaml
+  - ./generic-device-plugin/ks.yaml

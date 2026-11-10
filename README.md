@@ -39,13 +39,15 @@ worth much anyway, so that's stickiness I can live with.
 
 - Single k3s control plane node: `control-00` (the NAS, see above).
 - Worker nodes: `worker-00`, `worker-01`, `worker-02`.
+- GPU node: `ai-00` (2x Radeon AI PRO R9700, tainted `amd.com/gpu`; see `AGENTS.md`).
 - Note: `CiliumLoadBalancerIPPool` + BGP handles `LoadBalancer` IPs,
   **not** MetalLB (a MetalLB Helm repository source still exists in
   `flux-system/sources`, and a `metallb-system` namespace still exists in the
   cluster, but both are unused legacy). Pin a VIP with the
   `io.cilium/lb-ipam-ips` annotation rather than `spec.loadBalancerIP`.
 - Assigned VIPs from the pool (`192.168.2.6-192.168.2.254`): `.7`
-  k8s-gateway, `.8` lan-dns, `.9` the `wildcard-gregbob-net` Gateway. `.6` is
+  k8s-gateway, `.8` lan-dns, `.9` the `wildcard-gregbob-net` Gateway, `.10`
+  livekit media. `.6` is
   free (it was the IRC VIP, removed 2026-09-14).
 
 See **Core components** below for storage, networking, secrets, and

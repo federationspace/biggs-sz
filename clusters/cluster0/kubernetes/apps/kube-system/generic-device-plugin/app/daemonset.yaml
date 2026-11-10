@@ -1,0 +1,96 @@
+---
+# squat/generic-device-plugin on ai-00, for the Moonlight game sessions
+# (dreamcast/fenrir). Ported from biggs.dog cluster1
+# kube-system/generic-device-plugin (same image pin), plus two shared
+# render-node resources.
+#
+#   squat.ai/uinput    /dev/uinput, for wolf's virtual input devices
+#                      (uinput is built into ai-00's 7.0 HWE kernel)
+#   squat.ai/r9700-a   render node of the R9700 in PCIEX16_1 (0000:03:00.0)
+#   squat.ai/r9700-b   render node of the R9700 in PCIEX16_2 (0000:07:00.0)
+#
+# Each card resource has count 8 (2 per session: wolf + game container, so 4
+# sessions per card). Both are mounted at /dev/dri/renderD200 in the
+# container so wolf and the game always see the same fixed path
+# (WOLF_RENDER_NODE). Card resources are separate from the ROCm plugin's
+# amd.com/gpu-ai-pro-r9700, which Radiance requests exclusively; the GPU
+# arbiter keeps the two from running at once.
+#
+# The by-path names are hardware config: they change if a card moves slots.
+# They are symlinks; containerd's CRI resolves device symlinks
+# (ResolveSymbolicLink in WithDevices), so the real /dev/dri/renderD* node is
+# what gets mounted. The iGPU (0000:10:00.0) is deliberately not exposed.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: generic-device-plugin
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: generic-device-plugin
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: generic-device-plugin
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: generic-device-plugin
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: ai-00
+      tolerations:
+        - key: amd.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      priorityClassName: system-node-critical
+      containers:
+        - name: generic-device-plugin
+          image: ghcr.io/squat/generic-device-plugin:latest@sha256:8dc84958301f054bf72d9753a7a2c9af3d6642a9844b34d1171b3f2cdb4a15f6
+          args:
+            # The :latest image changed the default domain to devic.es;
+            # fenrir's User CR requests squat.ai/*.
+            - --domain
+            - squat.ai
+            - --device
+            - |
+              name: uinput
+              groups:
+                - count: 16
+                  paths:
+                    - path: /dev/uinput
+            - --device
+            - |
+              name: r9700-a
+              groups:
+                - count: 8
+                  paths:
+                    - path: /dev/dri/by-path/pci-0000:03:00.0-render
+                      mountPath: /dev/dri/renderD200
+            - --device
+            - |
+              name: r9700-b
+              groups:
+                - count: 8
+                  paths:
+                    - path: /dev/dri/by-path/pci-0000:07:00.0-render
+                      mountPath: /dev/dri/renderD200
+          resources:
+            requests:
+              cpu: 50m
+              memory: 10Mi
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: device-plugin
+              mountPath: /var/lib/kubelet/device-plugins
+            - name: dev
+              mountPath: /dev
+      volumes:
+        - name: device-plugin
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+        - name: dev
+          hostPath:
+            path: /dev
+  updateStrategy:
+    type: RollingUpdate

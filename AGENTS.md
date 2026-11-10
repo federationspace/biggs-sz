@@ -61,8 +61,30 @@ kubernetes/apps/<ns>/<app>/
 ## Cluster specifics that bite
 
 - **Nodes**: `control-00` (single k3s control plane, also the NAS host),
-  `worker-00`, `worker-01`, `worker-02`. `worker-05` was retired; stale
-  references to it and to `control-01` are bugs, not history.
+  `worker-00`, `worker-01`, `worker-02`, and the GPU node `ai-00` (below).
+  `worker-05` was retired; stale references to it and to `control-01` are
+  bugs, not history.
+- **GPU node `ai-00`** (`192.168.2.90`, 2x Radeon AI PRO R9700 32 GB, no Ceph
+  OSD) is tainted `amd.com/gpu=present:NoSchedule` and labelled
+  `biggs.sz/role=ai`. Both come from `/etc/rancher/k3s/config.yaml` on the
+  node, not from Git, so only pods that tolerate the taint land there; a
+  DaemonSet that should run on every node needs the toleration (NFD worker and
+  victoria-logs-collector carry it; Cilium and node-exporter tolerate
+  everything).
+  - GPU resources: the ROCm plugin (`kube-system/amd-gpu-device-plugin`) runs
+    with `product` naming, so the R9700s are **`amd.com/gpu-ai-pro-r9700`**
+    (2). The board's iGPU stays enabled because it drives the console HDMI; it
+    appears as plain `amd.com/gpu` (1) and nothing may request it. Never
+    request bare `amd.com/gpu` on ai-00.
+  - `kube-system/generic-device-plugin` adds `squat.ai/uinput` (16) and one
+    shared render-node resource per card, `squat.ai/r9700-a` (`0000:03:00.0`)
+    and `squat.ai/r9700-b` (`0000:07:00.0`), 8 each, mounted at
+    `/dev/dri/renderD200`. They are keyed on `/dev/dri/by-path`, which is
+    hardware config: re-check after any slot change. `cardN` numbers shift
+    between boots, so never key anything on them.
+  - Per-card VRAM is `node_drm_memory_vram_{size,used}_bytes` (node-exporter
+    `--collector.drm`). It includes the 512 MiB iGPU; filter the R9700s by
+    size (`> 16e9`), not by card name.
 - The control plane hosts media pods on purpose: downloads stage on the
   node's local SSD, then move to the ZFS pool locally instead of over the
   1Gbps network. Most `*arr` apps and `sabnzbd` pin to `control-00`;
@@ -93,7 +115,9 @@ kubernetes/apps/<ns>/<app>/
   MetalLB HelmRepository source and a live `metallb-system` namespace still
   exist; both are legacy and unused.
   Assigned VIPs: `.7` k8s-gateway, `.8` lan-dns, `.9`
-  wildcard-gregbob-net Gateway.
+  wildcard-gregbob-net Gateway, `.10` livekit media. The pool overlaps the
+  DHCP/node range, so check `kubectl get svc -A -o wide` before giving a node
+  or a Service an address in it.
 - **Ingress lives in `network/`**: `agentgateway` (the Gateway API
   implementation, Gateway `wildcard-gregbob-net`), `k8s-gateway` (DNS
   authority for the `gregbob.net` zone), `lan-dns` (CoreDNS LAN resolver).
