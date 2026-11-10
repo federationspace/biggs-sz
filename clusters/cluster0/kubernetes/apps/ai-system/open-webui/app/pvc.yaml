@@ -1,0 +1,16 @@
+---
+# Open WebUI data: the SQLite database (users, chats, settings) plus the
+# embedding/tiktoken caches it downloads on first use. ceph-block, so the
+# pod is not tied to one worker.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: open-webui-data
+  namespace: ai-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ceph-block
+  resources:
+    requests:
+      storage: 10Gi

@@ -99,7 +99,11 @@ kubernetes/apps/<ns>/<app>/
   the `llm-api-key` client-token policy (1Password `radiance-model-api-key`).
   Its Secrets live in a separate, health-gated Kustomization the route depends
   on, because the policy fails open while its Secret is missing and
-  `*.gregbob.net` is a public wildcard.
+  `*.gregbob.net` is a public wildcard. The chat UI is `ai-system/open-webui`
+  (`chat.gregbob.net`), which signs in with Pocket ID itself (password login
+  and signup off) and calls Radiance in-cluster with the engine key. Its OAuth
+  settings come from the manifest on every start; its other settings
+  (connections, default model) are seeded once, then owned by Admin Settings.
 - The control plane hosts media pods on purpose: downloads stage on the
   node's local SSD, then move to the ZFS pool locally instead of over the
   1Gbps network. Most `*arr` apps and `sabnzbd` pin to `control-00`;

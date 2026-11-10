@@ -5,6 +5,7 @@ resources:
   # Pre Flux-Kustomizations
   - ./namespace.yaml
   # Flux-Kustomizations
+  - ./open-webui/ks.yaml
   - ./radiance/ks.yaml
   - ./agentgateway-ai/ks.yaml
   - ./radiance-dashboard/ks.yaml
