@@ -1,0 +1,14 @@
+---
+# ai-system: local LLM inference on the GPU node ai-00 (Radiance) and its
+# agentgateway ingress. Privileged PSA: Radiance runs seccomp Unconfined (the
+# engine's own compose default; Docker's/containerd's default profile refuses
+# io_uring and the NUMA calls the ROCm runtime makes), which `baseline`
+# forbids.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ai-system
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged

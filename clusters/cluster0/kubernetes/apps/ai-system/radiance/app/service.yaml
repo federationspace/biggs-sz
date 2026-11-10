@@ -1,0 +1,18 @@
+---
+# In-cluster clients call http://radiance.ai-system.svc:8000/v1 with the
+# engine key; everything outside goes through agentgateway (llm.gregbob.net).
+apiVersion: v1
+kind: Service
+metadata:
+  name: radiance
+  namespace: ai-system
+  labels:
+    app: radiance
+spec:
+  type: ClusterIP
+  selector:
+    app: radiance
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

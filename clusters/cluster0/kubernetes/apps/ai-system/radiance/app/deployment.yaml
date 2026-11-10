@@ -1,0 +1,146 @@
+---
+# Radiance (codeberg.org/StillDeadcode/radiance), an LLM engine for AMD GPUs,
+# serving an OpenAI-compatible API on :8000 across both R9700s (TP=2).
+# Ported from the engine's deploy/compose/common.yaml + the per-model file:
+#
+#   compose                         here
+#   network_mode: host              pod network + ClusterIP Service; binds
+#                                   0.0.0.0 (cluster0 is IPv4-only, so not ::)
+#   user 1000:1000 + render/video   runAsUser/runAsGroup 1000, supplementalGroups
+#                                   44 (video) + 993 (render), ai-00's GIDs
+#   devices /dev/kfd, /dev/dri      amd.com/gpu-ai-pro-r9700: 2 (the plugin
+#                                   mounts /dev/kfd + only the R9700s' nodes)
+#   seccomp=unconfined              seccompProfile Unconfined
+#   ulimits memlock -1              no k8s field: LimitMEMLOCK=infinity drop-in
+#                                   on ai-00's k3s-agent.service (verified)
+#   init: true                      none; the engine handles SIGTERM itself
+#   stop_grace_period 60s           40s, below the game sessions' 45 s wait for
+#                                   VRAM, so the kill backstop lands first
+#   /models:ro                      rw PVC: the engine fetches into it
+#   healthcheck, start_period 15m   startupProbe /health, 60 min budget (a big
+#                                   model download + load)
+#
+# The argv parser matches each flag exactly and rejects unknown tokens, so
+# every flag and its value are separate list items (no --flag=value).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: radiance
+  namespace: ai-system
+  labels:
+    app: radiance
+spec:
+  replicas: 1
+  # Never two pods holding the GPUs. New object, so Recreate is accepted
+  # (switching an existing Deployment to it is rejected by server-side apply).
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: radiance
+  template:
+    metadata:
+      labels:
+        app: radiance
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: ai-00
+      tolerations:
+        - key: amd.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        supplementalGroups: [44, 993]
+        seccompProfile:
+          type: Unconfined
+      containers:
+        - name: radiance
+          # Docker Hub stilldeadcode/radiance 1.17.0, linux/amd64 platform
+          # manifest (the tag is an OCI index). Fast-moving image: re-pin on
+          # engine updates, never run :latest.
+          image: docker.io/stilldeadcode/radiance:1.17.0@sha256:6fb0e99bfb862e17cc15cb7b2f116c7dbdc831df59f82456a0691122e6cf5330
+          imagePullPolicy: IfNotPresent
+          args:
+            - --model
+            - "${RADIANCE_MODEL}"
+            - --model-revision
+            - "${RADIANCE_MODEL_REVISION}"
+            - --download-dir
+            - /models
+            - --served-model-name
+            - "${RADIANCE_SERVED_NAME}"
+            - --tp
+            - "${RADIANCE_TP}"
+            - --max-num-seqs
+            - "${RADIANCE_MAX_NUM_SEQS}"
+            - --max-model-len
+            - "${RADIANCE_MAX_MODEL_LEN}"
+            - --kv-cache-dtype
+            - "${RADIANCE_KV_CACHE_DTYPE}"
+            - --gpu-headroom-mib
+            - "${RADIANCE_GPU_HEADROOM_MIB}"
+            - --max-num-batched-tokens
+            - "${RADIANCE_MAX_NUM_BATCHED_TOKENS}"
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+            # The key comes from the environment, not argv (argv is
+            # world-readable in ps and /proc). The engine refuses to start if
+            # the variable is unset or empty.
+            - --api-key-env
+            - RADIANCE_API_KEY
+          env:
+            - name: RADIANCE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: radiance-secrets
+                  key: RADIANCE_API_KEY
+            # Read by the engine's hfget.sh; the models are public, so this
+            # only lifts the anonymous rate limit (and covers gated repos).
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: radiance-secrets
+                  key: HF_TOKEN
+          ports:
+            - name: http
+              containerPort: 8000
+          resources:
+            requests:
+              amd.com/gpu-ai-pro-r9700: "2"
+              cpu: "4"
+              memory: 16Gi
+            limits:
+              amd.com/gpu-ai-pro-r9700: "2"
+              memory: 24Gi
+          # /health and /ping are the same handler and need no API key. The
+          # server listens only after the model is fetched and loaded, and
+          # answers 503 while stopping or after 60 s of a stuck device.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 360
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            periodSeconds: 10
+            failureThreshold: 6
+          volumeMounts:
+            - name: models
+              mountPath: /models
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: radiance-models

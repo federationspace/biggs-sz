@@ -1,0 +1,49 @@
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app radiance
+  namespace: flux-system
+spec:
+  dependsOn:
+    # The ROCm plugin must advertise amd.com/gpu-ai-pro-r9700 first.
+    - name: amd-gpu-device-plugin
+    # ClusterSecretStore for the ExternalSecret.
+    - name: secretstore
+  targetNamespace: ai-system
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  path: ./clusters/cluster0/kubernetes/apps/ai-system/radiance/app
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  # wait: false: a first start downloads the model (minutes to an hour), which
+  # must not hold the Kustomization or anything that depends on it.
+  wait: false
+  interval: 3m
+  retryInterval: 1m
+  timeout: 2m
+  postBuild:
+    substitute:
+      # The model knob. Changing these rolls the Deployment; the engine fetches
+      # the named Hugging Face repo into the radiance-models PVC on start
+      # (resumable, manifest-verified) and serves it under the stable id
+      # `local`, so clients never change. Each model's flags come from the
+      # engine repo's deploy/compose/<model>.yaml; flags a model does not set
+      # take the engine default written here (gpu-headroom 96, batched 2048).
+      #
+      # Bring-up: MiniCPM5-2B FP8 (3 GiB), to prove gfx1201 + TP=2 boot.
+      # Next (one follow-up PR): StillDeadcode/qwen3.8-27b-mxfp4 @
+      # 60bd4139f335205fbc120e5534329c30b691af0e, max-model-len 200000,
+      # gpu-headroom 96, max-num-batched-tokens 2048.
+      RADIANCE_MODEL: StillDeadcode/minicpm5-2b-fp8
+      RADIANCE_MODEL_REVISION: 2b60d4c417c0b0a06429f197f6b9eebcc6beab72
+      RADIANCE_SERVED_NAME: local
+      RADIANCE_TP: "2"
+      RADIANCE_MAX_NUM_SEQS: "32"
+      RADIANCE_MAX_MODEL_LEN: "131072"
+      RADIANCE_KV_CACHE_DTYPE: fp8
+      RADIANCE_GPU_HEADROOM_MIB: "160"
+      RADIANCE_MAX_NUM_BATCHED_TOKENS: "512"

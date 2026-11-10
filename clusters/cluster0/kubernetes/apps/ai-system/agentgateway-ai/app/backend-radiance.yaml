@@ -1,0 +1,28 @@
+---
+# AI-aware backend for the local Radiance engine (plaintext Service, so no
+# TLS block). The gateway authenticates upstream with the engine key from
+# radiance-api-key; clients never see it. host/port sit under
+# spec.ai.provider (the live CRD has no spec.ai.host).
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: radiance
+  namespace: ai-system
+spec:
+  ai:
+    provider:
+      openai: {}
+      host: radiance.ai-system.svc.cluster.local
+      port: 8000
+  policies:
+    auth:
+      secretRef:
+        name: radiance-api-key
+    ai:
+      # Path suffix -> handler (biggs.dog's vllm backend map). /v1/models and
+      # everything else (Responses, Anthropic Messages, embeddings, ...) pass
+      # through to Radiance, which serves them natively.
+      routes:
+        "/v1/chat/completions": "Completions"
+        "/v1/models": "Passthrough"
+        "*": "Passthrough"
