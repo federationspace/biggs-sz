@@ -1,0 +1,40 @@
+---
+# Scrape CNPG instance pods into VictoriaMetrics (issue #261, B5).
+#
+# Every instance pod (primary and replicas, all clusters) serves CNPG
+# metrics on port `metrics` (9187): pg_stat_* views, replication lag, and,
+# on clusters enrolled in offsite backups, the Barman Cloud plugin gauges
+# (barman_cloud_cloudnative_pg_io_*) that the plugin sidecar contributes to
+# the same endpoint.
+#
+# CNPG creates no Service for the metrics port, so this is a pod scrape.
+# vmagent (observability/stack) runs selectAllByDefault=true and discovers
+# this with no config change.
+#
+# The relabels exist so the alert rules can be written per CNPG cluster
+# (cnpg_cluster) and against the primary only (cnpg_role). `role` is the
+# label CNPG sets to primary/replica and updates on switchover;
+# cnpg.io/cluster names the Cluster.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: cnpg-instances
+  namespace: cnpg-system
+spec:
+  namespaceSelector:
+    matchNames:
+      - cnpg-system
+  selector:
+    matchLabels:
+      # Instance pods only; excludes any pod CNPG labels differently
+      # (e.g. future sidecar/member pods).
+      cnpg.io/podRole: instance
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      relabelConfigs:
+        - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
+          targetLabel: cnpg_cluster
+        - sourceLabels: [__meta_kubernetes_pod_label_role]
+          targetLabel: cnpg_role
