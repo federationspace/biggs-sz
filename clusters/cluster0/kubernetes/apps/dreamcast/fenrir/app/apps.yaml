@@ -84,6 +84,17 @@ spec:
 
               export PULSE_SINK="$(pactl list sinks short | awk '$2 ~ /^virtual_sink/ {print $2; exit}')"
               export PULSE_SOURCE="${PULSE_SINK}.monitor"
+
+              # The kubelet auto-creates this container's state/<app> subPath
+              # directory as root:0750 at mount time (wolf has not created it
+              # yet), so /home/retro is unwritable once the GOW entrypoint
+              # drops to uid 1000 and Firefox aborts (GTK icon loader crash)
+              # -> black screen. This container gets no PUID/PGID env (the
+              # operator only injects those into the wolf container), so use
+              # literal ids. The steam app's chown line is a silent no-op for
+              # the same reason; its chmod is what actually fixes home there.
+              chown -R 1000:1000 /home/retro
+              chmod 777 /home/retro
               exec /entrypoint.sh
 ---
 # Ported from the biggs.dog steam App, minus the NVIDIA-specific pieces:
