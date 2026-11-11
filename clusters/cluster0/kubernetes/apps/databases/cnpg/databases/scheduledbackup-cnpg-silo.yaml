@@ -1,0 +1,17 @@
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: cnpg-silo-daily
+  namespace: cnpg-system
+spec:
+  # After the 03:00-03:50 block (renovate, pocketid, gitea, romm,
+  # rreading-glasses, pinepods) so base backups do not overlap.
+  schedule: "0 0 4 * * *"
+  immediate: true
+  backupOwnerReference: self
+  cluster:
+    name: cnpg-silo
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io

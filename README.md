@@ -79,7 +79,7 @@ clusters/cluster0/
     ├── matrix/                    # continuwuity, sable
     ├── media/                     # jellyfin, plex, sonarr, radarr, lidarr, readarr, prowlarr,
     │                             # sabnzbd, ombi, homarr, romm, rreading-glasses, epub-only,
-    │                             # pinepods, media-storage
+    │                             # pinepods, silo, media-storage
     ├── network/                   # agentgateway, k8s-gateway, lan-dns
     ├── observability/             # victoria-metrics, victoria-logs, grafana-operator,
     │                             # matrix-alertmanager-receiver

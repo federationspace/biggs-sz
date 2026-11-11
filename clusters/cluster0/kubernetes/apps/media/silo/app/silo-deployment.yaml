@@ -1,0 +1,190 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: silo
+  namespace: media
+  labels:
+    app: silo
+spec:
+  replicas: 1
+  # Single replica backed by an RWO (ceph-block) data PVC. RollingUpdate can
+  # surge a second pod that deadlocks on a Multi-Attach error for the RWO
+  # volume; Recreate terminates the old pod first.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: silo
+  template:
+    metadata:
+      labels:
+        app: silo
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      automountServiceAccountToken: false
+      # worker-00 (user-requested pin; Intel iGPU, gpu.intel.com/i915 x4, for VA-API transcoding).
+      nodeSelector:
+        kubernetes.io/hostname: worker-00
+      # One-time migration of the pre-omnibus silo-data layout: artwork/ and
+      # plugins/ sit at the PVC top level (the old /var/lib/silo layout) and
+      # are root-owned; the omnibus app expects them under /config/silo owned
+      # by 911:911. This initContainer restructures the top level into
+      # silo/, re-owns the tree to 911:911 and writes the /config/.silo-owner
+      # marker so the image's own walk is skipped on first boot. On every
+      # later pod start it is a no-op (one cat + stat).
+      # It runs inside the pod that holds the RWO silo-data attach, so the
+      # restructure cannot race a separate Job for the volume and it always
+      # completes before /init starts the app. It needs CHOWN/FOWNER because
+      # the main container drops all capabilities, whose own ownership walk
+      # would silently fail to chown.
+      initContainers:
+        - name: silo-data-migrate
+          image: ghcr.io/silo-server/silo-server:latest@sha256:590b908dfc5135775aa17212acd1cbc8d5d74de5dd58e9e6ae859a248549bf37
+          imagePullPolicy: Always
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              if [ -f /config/.silo-owner ] \
+                 && [ "$(cat /config/.silo-owner)" = "911:911" ] \
+                 && [ "$(stat -c '%u %g' /config/silo 2>/dev/null)" = "911 911" ]; then
+                echo "silo-data already restructured and owned by 911:911; skipping migration"
+                exit 0
+              fi
+              mkdir -p /config/silo
+              for d in artwork plugins compat; do
+                if [ -d "/config/$d" ] && [ ! -e "/config/silo/$d" ]; then
+                  mv "/config/$d" "/config/silo/"
+                fi
+              done
+              find /config/silo \( ! -user 911 -o ! -group 911 \) -exec chown -h 911:911 {} +
+              printf '911:911' > /config/.silo-owner
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - FOWNER
+                # DAC_READ_SEARCH: root without CAP_DAC_OVERRIDE gets EACCES
+                # traversing the 0700 root-owned plugin install-<n> dirs (see
+                # #735); read/search bypass only, no DAC_OVERRIDE.
+                - DAC_READ_SEARCH
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          volumeMounts:
+            - name: silo-data
+              mountPath: /config
+      containers:
+        - name: silo
+          # Pre-1.0: the `latest` tag moves, so pin the image index digest
+          # for deterministic rollouts. This is the omnibus image (first
+          # published upstream as #3319, 2026-10-31): ENTRYPOINT is the
+          # s6-overlay /init,
+          # so pid 1 MUST start as root - do NOT add runAsUser/runAsNonRoot,
+          # either one stops /init. s6 then drops the silo SERVICE process to
+          # PUID/PGID 911. Keep allowPrivilegeEscalation:false + drop ALL,
+          # but add CHOWN/FOWNER/SETUID/SETGID: the /init stage-1 scripts
+          # need them (verified against build-1969, #737) - usermod -aG
+          # rewrites /etc/gshadow (CHOWN), s6-applyuidgid setgroups before
+          # the uid drop (SETGID/SETUID), install/chown own the service
+          # dirs (CHOWN/FOWNER). s6 then drops every service to its own
+          # account and no_new_privs bars re-acquisition, so the silo
+          # process (911) holds none of these in its effective set.
+          # Inside the image /var/lib/silo is a symlink to /config/silo, so
+          # silo-data is mounted at /config (never at /var/lib/silo, which
+          # would shadow the symlink): the ownership marker
+          # /config/.silo-owner then persists on the PVC and the image's
+          # ownership walk runs once instead of re-walking ~300k artwork
+          # files on every pod recreation.
+          image: ghcr.io/silo-server/silo-server:latest@sha256:590b908dfc5135775aa17212acd1cbc8d5d74de5dd58e9e6ae859a248549bf37
+          imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - FOWNER
+                - SETUID
+                - SETGID
+          ports:
+            - containerPort: 8080
+              name: web
+            - containerPort: 8096
+              name: jellyfin-compat
+            - containerPort: 13378
+              name: abs-compat
+          env:
+            - name: MODE
+              value: integrated
+            - name: PORT
+              value: "8080"
+            - name: JF_PORT
+              value: "8096"
+            # Master key for at-rest credential encryption. Back it up
+            # separately from DB dumps: losing it strands stored credentials.
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: silo-secret-key
+                  key: SECRET_KEY
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: silo-database-url
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              value: redis://silo-valkey.media.svc.cluster.local:6379
+            # Keep the plugin cache on the durable data PVC.
+            - name: SILO_PLUGIN_CACHE_DIR
+              value: /config/silo/plugins
+            # CNPG owns the postgres config; silo's ALTER SYSTEM auto-tune
+            # would fight the operator.
+            - name: POSTGRES_TUNE
+              value: "off"
+          readinessProbe:
+            httpGet:
+              path: /api/v1/ready
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          # No livenessProbe: first boot runs DB setup/migrations that can take
+          # a while, and the docs say to leave silo alone while it settles. A
+          # liveness window would restart it mid-setup.
+          volumeMounts:
+            - name: silo-data
+              mountPath: /config
+            - name: media-nfs
+              mountPath: /mnt/media
+              readOnly: true
+            - name: silo-transcode
+              mountPath: /tmp/silo-transcode
+          resources:
+            limits:
+              gpu.intel.com/i915: "1"
+              memory: 6Gi
+            requests:
+              gpu.intel.com/i915: "1"
+              memory: 3Gi
+      volumes:
+        - name: silo-data
+          persistentVolumeClaim:
+            claimName: silo-data
+        - name: media-nfs
+          persistentVolumeClaim:
+            claimName: media-pvc
+        - name: silo-transcode
+          emptyDir:
+            sizeLimit: 80Gi
