@@ -1,0 +1,52 @@
+---
+# listenarr.gregbob.net: Listenarr (audiobook *arr) behind Pocket ID SSO.
+# Two stages: the ext-authz policy (listenarr-auth) exists before the route so
+# the hostname is never open to the internet (*.gregbob.net is a public
+# wildcard); the app stage also waits for oauth2-proxy to serve.
+# extAuth fails closed: a missing or endpoint-less oauth2-proxy answers 403.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app listenarr-auth
+  namespace: flux-system
+spec:
+  dependsOn:
+    # The AgentgatewayPolicy CRD.
+    - name: agentgateway
+  targetNamespace: media
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  path: ./clusters/cluster0/kubernetes/apps/media/listenarr/auth
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  interval: 3m
+  retryInterval: 1m
+  timeout: 2m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app listenarr
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: listenarr-auth
+    # The sign-in service the policy calls.
+    - name: oauth2-proxy
+  targetNamespace: media
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  path: ./clusters/cluster0/kubernetes/apps/media/listenarr/app
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: false
+  interval: 3m
+  retryInterval: 1m
+  timeout: 2m

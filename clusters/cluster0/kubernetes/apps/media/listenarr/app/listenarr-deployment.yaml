@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: listenarr
+  name: listenarr
+  namespace: media
+spec:
+  template:
+    metadata:
+      labels:
+        app: listenarr
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: control-00
+      containers:
+        # Pinned canary-X.Y.Z tag; the regex versioning override in
+        # renovate.json drives bumps. Beta software: excluded from the
+        # media-apps patch automerge, so every bump is a reviewed PR.
+        # Starts as root and drops to uid 1000 via gosu, so no
+        # securityContext (runAsNonRoot would break PUID/PGID).
+        # First start downloads a static ffmpeg build into the config PVC
+        # (~194MB, once per fresh PVC); accepted as-is.
+        - image: ghcr.io/listenarrs/listenarr:canary-1.3.4
+          imagePullPolicy: Always
+          name: listenarr
+          env:
+            - name: TZ
+              value: "America/Detroit"
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+            - name: UMASK
+              value: "022"
+            - name: LISTENARR_LOG_LEVEL
+              value: "Information"
+            - name: LISTENARR_PUBLIC_URL
+              value: "https://listenarr.gregbob.net"
+          ports:
+            - name: listenarr-port
+              containerPort: 4545
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /api/v1/system/status
+              port: 4545
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 10
+          volumeMounts:
+            - name: listenarr-config
+              mountPath: /app/config
+            - name: listenarr-media
+              mountPath: /audiobooks
+          resources:
+            requests:
+              memory: 512Mi
+              cpu: 100m
+            limits:
+              memory: 2Gi
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      volumes:
+        - name: listenarr-config
+          persistentVolumeClaim:
+            claimName: "listenarr-config-ceph"
+        - name: listenarr-media
+          persistentVolumeClaim:
+            claimName: "media-pvc"
+  selector:
+    matchLabels:
+      app: listenarr

@@ -160,6 +160,19 @@
       "matchDatasources": ["docker"],
       "matchPackageNames": ["/^(docker\\.io|lscr\\.io|ghcr\\.io)/linuxserver//"],
       "automerge": false
+    },
+    {
+      "description": "Listenarr publishes only canary-X.Y.Z tags (no stable channel yet). Default docker versioning cannot parse the canary- prefix, so a pinned tag would be inert; this regex makes canary-1.3.4 a real version so the kubernetes manager proposes bumps",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ghcr.io/listenarrs/listenarr"],
+      "versioning": "regex:^canary-(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$"
+    },
+    {
+      "description": "Listenarr is beta software with no stable channel; keep every bump a reviewed PR instead of the media-apps patch automerge",
+      "matchManagers": ["kubernetes"],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ghcr.io/listenarrs/listenarr"],
+      "automerge": false
     }
   ]
 }
