@@ -41,7 +41,10 @@ worth much anyway, so that's stickiness I can live with.
 - Worker nodes: `worker-00`, `worker-01`, `worker-02`.
 - GPU node: `ai-00` (2x Radeon AI PRO R9700, tainted `amd.com/gpu`; see `AGENTS.md`).
   It serves a local LLM (Radiance, `ai-system/`) at `llm.gregbob.net` (API)
-  and `chat.gregbob.net` (Open WebUI, Pocket ID sign-in).
+  and `chat.gregbob.net` (Open WebUI, Pocket ID sign-in). It also hosts
+  Moonlight game streaming (Fenrir/direwolf, `dreamcast/`) on VIP
+  `192.168.2.11`, with the GPU arbiter (PR 4) keeping Radiance and game
+  sessions off the same card at once.
 - Note: `CiliumLoadBalancerIPPool` + BGP handles `LoadBalancer` IPs,
   **not** MetalLB (a MetalLB Helm repository source still exists in
   `flux-system/sources`, and a `metallb-system` namespace still exists in the

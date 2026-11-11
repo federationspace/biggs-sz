@@ -1,0 +1,19 @@
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: fenrir
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://github.com/midilicious/fenrir
+  ref:
+    branch: feat/multi-user
+    # Pinned for reproducibility; bump deliberately to pick up CRD changes.
+    # 7dcd7d2 (P0) adds User.spec.gpuVendor, which makes the operator's
+    # game-container NVIDIA env block vendor-conditional (default nvidia;
+    # cluster0 Users set amd for the VA-API stack). The operator, wolf-agent
+    # and moonlight-proxy are built from this commit by the fork's CI
+    # (v0.1.8-amd.1, pinned in fenrir-oci.yaml); wolf itself stays on
+    # shrinedogg/wolf (WOLF_IMAGE in the fenrir HelmRelease).
+    commit: 7dcd7d2b7cf79815f68783e89af34e61232ba3e8

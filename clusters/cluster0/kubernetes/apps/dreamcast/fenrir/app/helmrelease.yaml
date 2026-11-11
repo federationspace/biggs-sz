@@ -1,0 +1,83 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: fenrir
+  namespace: dreamcast
+spec:
+  interval: 3m
+  chartRef:
+    kind: OCIRepository
+    name: direwolf-operator
+    namespace: flux-system
+  # Built from midilicious/fenrir @ 7dcd7d2 (P0): the operator's
+  # game-container NVIDIA env block (LIBVA_DRIVER_NAME=nvidia,
+  # NVIDIA_LD_LIBRARY_PATH, NVIDIA_DRIVER_CAPABILITIES,
+  # NVIDIA_VISIBLE_DEVICES) is now conditional on User.spec.gpuVendor, so
+  # the amd Users in this namespace get a clean VA-API environment.
+  # operator / wolf-agent / moonlight-proxy are pinned by digest; wolf
+  # itself (WOLF_IMAGE) is unchanged and vendor-neutral: on ai-00 the
+  # encode pipeline lands on VA-API (verify: wolf logs show a vaapi
+  # encoder, not an x264 software fallback).
+  values:
+    controllers:
+      direwolf_operator:
+        containers:
+          operator:
+            image:
+              # v0.1.8-amd.1 = P0 on the upstream multi-user line:
+              # session retry + stale trackedSessions prune (fork), user
+              # controller with PublicPinURL (v0.1.1), concurrent
+              # per-port-block sessions (v0.1.2), client_settings
+              # .motion_controller_override (v0.1.4), ready-pod gate +
+              # bounded wolf calls (v0.1.5), App-level
+              # NVIDIA_VISIBLE_DEVICES pin (v0.1.7), and
+              # gpuVendor-conditional game env (P0).
+              repository: ghcr.io/midilicious/fenrir/direwolf-operator
+              tag: "v0.1.8-amd.1@sha256:fc948e2a1aa3c7bcc4453c72a6d6aa399be6b342c683f13ce254fbafa6018067"
+            # The operator's --lb-sharing-key defaults to POD_NAMESPACE
+            # ("dreamcast"), but the chart's moonlight-proxy Service is
+            # annotated with sharing-key "direwolf". Mismatched keys make
+            # Cilium LB-IPAM hand the per-session RTP Service a *different*
+            # external IP than the proxy, so Moonlight's RTSP handshake to
+            # the paired IP:48010 times out. Align the key so every session
+            # Service shares the proxy's LB IP.
+            args:
+              - --lb-sharing-key=direwolf
+              # The moonlight-proxy Service in this cluster is named
+              # "direwolf" (not the chart's "moonlight-proxy" default), so
+              # the user controller needs the explicit name to publish the
+              # pin URL.
+              - --proxy-service-name=direwolf
+            env:
+              # v0.1.8-amd.1 line: fake-udev agent (writes /run/udev/data +
+              # synthetic netlink events so SDL/Steam detect hotplugged
+              # controllers), pod-private /dev/input scoping (v0.1.3).
+              AGENT_IMAGE: ghcr.io/midilicious/fenrir/wolf-agent:v0.1.8-amd.1@sha256:8e10ef6ac77a594aa494de434e1fb57ab5929f2928af89d2598e5d0ed3f49628
+              # Forked wolf (Fedora base, upstream v2026.11 + the
+              # HDR/HEVC Main10 chain, dormant unless WOLF_ENABLE_HDR=TRUE;
+              # see users.yaml).
+              WOLF_IMAGE: docker.io/shrinedogg/wolf:v0.2.9
+      moonlight_proxy:
+        containers:
+          proxy:
+            # NOTE: also see the service.app pin below, which stabilizes
+            # the shared direwolf LB VIP.
+            image:
+              # v0.1.8-amd.1 line: /launch waits up to 120s for the
+              # session pod (upstream 25s timed out cold starts),
+              # multi-user pairing (v0.1.2), HEVC Main10 advertised in
+              # ServerCodecModeSupport (v0.1.6).
+              repository: ghcr.io/midilicious/fenrir/moonlight-proxy
+              tag: "v0.1.8-amd.1@sha256:1c4450500f2877766dd687bac28ab16eb46e4a7d3098ee855841cb15aec0d391"
+    # Pin the shared moonlight-proxy LoadBalancer VIP. The chart's
+    # service.app already carries lbipam.cilium.io/sharing-key: direwolf
+    # (and the per-session RTP Services share this IP via that key); Helm
+    # merges this annotation in, so the whole direwolf group stays on a
+    # stable address instead of drifting across the pool on recreation.
+    # .11 is the dreamcast assignment (checked free 2026-11-10).
+    service:
+      app:
+        annotations:
+          io.cilium/lb-ipam-ips: "192.168.2.11"

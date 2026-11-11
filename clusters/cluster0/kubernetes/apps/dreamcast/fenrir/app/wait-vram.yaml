@@ -1,0 +1,24 @@
+---
+# Init-container script for the game Apps (see apps.yaml): block until
+# Radiance has released card A, the R9700 in PCIEX16_1 that the sessions
+# run on, so a game started right after the GPU arbiter scaled Radiance to
+# 0 does not launch into a full card. Gives up after TIMEOUT and starts
+# anyway. Sysfs is readable inside unprivileged containers, so the init
+# container only needs the script (no devices, no privileged).
+# 0000:03:00.0 is card A's PCI address (generic-device-plugin
+# squat.ai/r9700-a); it is hardware config and changes if a card moves
+# slots.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wait-vram
+  namespace: dreamcast
+data:
+  wait-vram.sh: |
+    #!/bin/sh
+    # Block until Radiance has released card A, so the game doesn't start
+    # into a full card. Gives up after TIMEOUT and starts anyway.
+    F=/sys/bus/pci/devices/0000:03:00.0/mem_info_vram_used
+    LIMIT=$((4 * 1024 * 1024 * 1024)); TIMEOUT=45; t=0
+    while [ "$(cat $F)" -gt "$LIMIT" ] && [ $t -lt $TIMEOUT ]; do sleep 1; t=$((t+1)); done
+    echo "card A VRAM used: $(cat $F) bytes after ${t}s"

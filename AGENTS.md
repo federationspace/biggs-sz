@@ -104,6 +104,21 @@ kubernetes/apps/<ns>/<app>/
   and signup off) and calls Radiance in-cluster with the engine key. Its OAuth
   settings come from the manifest on every start; its other settings
   (connections, default model) are seeded once, then owned by Admin Settings.
+- **Game streaming**: `dreamcast/` runs fenrir/direwolf (Moonlight) on ai-00,
+  proxied at VIP `192.168.2.11`. It is the AMD port of the biggs.dog stack:
+  pinned to the `midilicious/fenrir` fork (P0: `User.spec.gpuVendor`, commit
+  `7dcd7d2`), whose CRDs come from the `fenrir` GitRepository (unpruned
+  Kustomization) and whose operator/agent/proxy images are the
+  `v0.1.8-amd.1` digest pins in the `direwolf-operator` OCI chart. The
+  `szkud` User sets `gpuVendor: amd`, which skips the operator's NVIDIA
+  game-container env block so VA-API (radeonsi) encodes on the R9700.
+  Sessions request the shared card-A resource `squat.ai/r9700-a` (wolf +
+  game container, 2 per session of the 8 slots) and each App's `wait-vram`
+  init container blocks until Radiance has released card A
+  (`/sys/bus/pci/devices/0000:03:00.0/mem_info_vram_used`); the GPU arbiter
+  (PR 4) scales Radiance to 0 while sessions run. The game container must
+  keep its `resources` at or under the User policy -- the operator validates
+  them and they are what the scheduler caps (4 concurrent sessions).
 - The control plane hosts media pods on purpose: downloads stage on the
   node's local SSD, then move to the ZFS pool locally instead of over the
   1Gbps network. Most `*arr` apps and `sabnzbd` pin to `control-00`;
@@ -143,7 +158,8 @@ kubernetes/apps/<ns>/<app>/
   MetalLB HelmRepository source and a live `metallb-system` namespace still
   exist; both are legacy and unused.
   Assigned VIPs: `.7` k8s-gateway, `.8` lan-dns, `.9`
-  wildcard-gregbob-net Gateway, `.10` livekit media. The pool overlaps the
+  wildcard-gregbob-net Gateway, `.10` livekit media, `.11` dreamcast
+  (Moonlight proxy). The pool overlaps the
   DHCP/node range, so check `kubectl get svc -A -o wide` before giving a node
   or a Service an address in it.
 - **Ingress lives in `network/`**: `agentgateway` (the Gateway API

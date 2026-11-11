@@ -1,0 +1,64 @@
+---
+# Shadows the GOW base-image /entrypoint.sh in the wolf sidecar (mounted
+# via the User's volumes + sidecarPolicies.wolf.volumeMounts). The stock
+# entrypoint runs the cont-init.d scripts and then gosu's to ${UNAME}, and
+# the operator hardcodes PUID=1000/UNAME=ubuntu -- but wolf's
+# supervisord.conf has user=root, so a non-root supervisord dies with
+# "Can't drop privilege as nonroot user". This wrapper keeps the init-script
+# behavior but forces root and execs the startup script without dropping
+# privileges.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wolf-root-entrypoint
+  namespace: dreamcast
+data:
+  entrypoint.sh: |
+    #!/usr/bin/env bash
+    set -e
+
+    source /opt/gow/bash-lib/utils.sh
+
+    # Force root: 10-setup_user.sh becomes a no-op and we never gosu.
+    export UNAME=root PUID=0 PGID=0 HOME=/root
+
+    for init_script in /etc/cont-init.d/*.sh; do
+      gow_log
+      gow_log "[ ${init_script}: executing... ]"
+      # shellcheck source=/dev/null
+      source "${init_script}"
+    done
+
+    # ai-00 R9700 (renderD200 is the generic-device-plugin's fixed mount
+    # path for both squat.ai/r9700-a and r9700-b). The operator sets
+    # WOLF_RENDER_NODE statically from the App CR
+    # (wolfConfig.runtimeVariables.renderNode). The sidecar runs privileged
+    # (users.yaml), so it sees every host render node and the configured one
+    # is normally present. This fallback covers the unprivileged case, where
+    # the device plugin injects only the allocated card's node: if the
+    # configured node is absent, wolf cannot detect the GPU vendor, falls
+    # back to software x264/x265, and waylanddisplaysrc fails to open the
+    # node, so the Wayland display never comes up, the app sits in
+    # "Waiting for wayland display..." and Moonlight shows no video. In that
+    # case use whichever AMD render node was injected.
+    if [ ! -e "${WOLF_RENDER_NODE:-/dev/dri/renderD200}" ]; then
+      detected=""
+      for node in /dev/dri/renderD*; do
+        [ -e "$node" ] || continue
+        vendor="$(cat "/sys/class/drm/$(basename "$node")/device/vendor" 2>/dev/null || true)"
+        if [ "$vendor" = "0x1002" ]; then
+          detected="$node"
+          break
+        fi
+      done
+      if [ -n "$detected" ]; then
+        gow_log "WOLF_RENDER_NODE=${WOLF_RENDER_NODE:-unset} is not present in this container; using injected AMD render node ${detected}"
+        export WOLF_RENDER_NODE="$detected"
+      else
+        gow_log "WARNING: WOLF_RENDER_NODE=${WOLF_RENDER_NODE:-unset} is not present and no AMD render node was found under /dev/dri; wolf will fall back to software encoding"
+      fi
+    fi
+
+    gow_log "Launching the container's startup script as root"
+    chmod +x /opt/gow/startup.sh
+    exec /opt/gow/startup.sh
