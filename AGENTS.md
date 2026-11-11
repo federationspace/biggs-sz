@@ -127,7 +127,8 @@ kubernetes/apps/<ns>/<app>/
   `jellyfin` pins to `worker-02` (Lunar Lake iGPU, `xe` driver, requests
   `gpu.intel.com/xe`) and `plex` to `worker-01` (Raptor Lake iGPU, `i915`
   driver, requests `gpu.intel.com/i915`) for hardware transcoding;
-  `continuwuity` pins to `worker-01`.
+  `silo` pins to `worker-00` (Intel iGPU, `i915` driver, requests
+  `gpu.intel.com/i915`) and `continuwuity` pins to `worker-01`.
 - **Hermes**: `hermes/hermes` is the Matrix bot (dashboard at
   `hermes.gregbob.net`). `hermes/harness2` is a separate Harness² workbench
   with its own PVC and dashboard (`harness2.gregbob.net`, own login) and no
