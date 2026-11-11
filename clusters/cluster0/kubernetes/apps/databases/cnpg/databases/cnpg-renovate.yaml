@@ -39,3 +39,11 @@ spec:
   storage:
     size: 15Gi
     storageClass: local-path
+  # Barman Cloud plugin: WAL archiving to the offsite ObjectStore (B2).
+  # Adding plugins: injects the barman sidecar, so CNPG rolls all instances
+  # (replicas first, then a switchover). Pilot cluster for #261.
+  plugins:
+  - name: barman-cloud.cloudnative-pg.io
+    isWALArchiver: true
+    parameters:
+      barmanObjectName: offsite

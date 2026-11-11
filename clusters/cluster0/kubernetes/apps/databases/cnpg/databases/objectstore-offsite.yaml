@@ -1,0 +1,27 @@
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: offsite
+  namespace: cnpg-system
+spec:
+  # 30 days of point-in-time recovery (Q2 of #261). Re-check bucket size a
+  # week after every cluster is enrolled.
+  retentionPolicy: "30d"
+  configuration:
+    # Each cluster writes under biggs-sz-cnpg/<cluster-name>/.
+    destinationPath: s3://biggs-sz-cnpg/
+    # Backblaze B2, us-east-005. Matches the 1Password item cnpg-backup-s3.
+    # Verified 2026-11-11 from the cluster with sidecar v0.16.0 (barman
+    # 3.20.1): no checksum-workaround env vars and no region needed.
+    endpointURL: https://s3.us-east-005.backblazeb2.com
+    s3Credentials:
+      accessKeyId:
+        name: cnpg-backup-s3
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: cnpg-backup-s3
+        key: ACCESS_SECRET_KEY
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
