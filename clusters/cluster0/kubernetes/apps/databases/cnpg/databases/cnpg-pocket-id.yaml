@@ -29,3 +29,10 @@ spec:
   storage:
     size: 5Gi
     storageClass: local-path
+  # Barman Cloud plugin: WAL archiving to the offsite ObjectStore (B2).
+  # B4 of #261; proven on the cnpg-renovate pilot (#326).
+  plugins:
+  - name: barman-cloud.cloudnative-pg.io
+    isWALArchiver: true
+    parameters:
+      barmanObjectName: offsite
