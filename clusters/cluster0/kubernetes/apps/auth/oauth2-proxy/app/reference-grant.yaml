@@ -12,6 +12,9 @@ spec:
     - group: agentgateway.dev
       kind: AgentgatewayPolicy
       namespace: ai-system
+    - group: agentgateway.dev
+      kind: AgentgatewayPolicy
+      namespace: media
   to:
     - group: ""
       kind: Service
