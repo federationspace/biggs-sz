@@ -16,4 +16,4 @@ spec:
     # and moonlight-proxy are built from this commit by the fork's CI
     # (v0.1.8-amd.1, pinned in fenrir-oci.yaml); wolf itself stays on
     # shrinedogg/wolf (WOLF_IMAGE in the fenrir HelmRelease).
-    commit: 7dcd7d2b7cf79815f68783e89af34e61232ba3e8
+    commit: 37a1dbd9caa8a9bb15c418726e90686100b5e277
