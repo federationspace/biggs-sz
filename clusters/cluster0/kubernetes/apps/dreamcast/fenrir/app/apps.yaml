@@ -76,6 +76,19 @@ spec:
             # just without the bubblewrap/seccomp wrapper).
             - name: GLYCIN_DISABLE_SANDBOX
               value: i-know-the-risks
+            # GPU access for the app user. The GOW entrypoint adds 'retro'
+            # only to the groups owning the devices listed here, and its
+            # default is "/dev/uinput /dev/input/event*", without /dev/dri.
+            # The R9700 render node (/dev/dri/renderD200 from the
+            # generic-device-plugin) is root:993 mode 0660, gid 993 being the
+            # HOST's render group (it is 'kvm' inside the steam image), so
+            # without this Sway dies with "Failed to open DRM render node
+            # /dev/dri/renderD200: Permission denied" and Moonlight shows a
+            # black screen while wolf streams fine. Wolf's own default app
+            # config sets this variable; the fenrir operator does not. Never
+            # mattered on biggs.dog because NVIDIA device nodes are 0666.
+            - name: GOW_REQUIRED_DEVICES
+              value: /dev/uinput /dev/input/event* /dev/dri/*
           command:
             - /bin/bash
             - -c
@@ -207,12 +220,25 @@ spec:
               value: "true"
             - name: PROTON_LOG
               value: "1"
-            # The steam image is fedora-based and ships the same GNOME
-            # glycin loader stack as the firefox app (see that app's
+            # The steam image (Ubuntu-based) ships the same GNOME glycin
+            # loader stack as the firefox app (see that app's
             # GLYCIN_DISABLE_SANDBOX comment). Disable the sandbox here too
             # so every app's icon decoding takes the same, proven path.
             - name: GLYCIN_DISABLE_SANDBOX
               value: i-know-the-risks
+            # GPU access for the app user. The GOW entrypoint adds 'retro'
+            # only to the groups owning the devices listed here, and its
+            # default is "/dev/uinput /dev/input/event*", without /dev/dri.
+            # The R9700 render node (/dev/dri/renderD200 from the
+            # generic-device-plugin) is root:993 mode 0660, gid 993 being the
+            # HOST's render group (it is 'kvm' inside the steam image), so
+            # without this Sway dies with "Failed to open DRM render node
+            # /dev/dri/renderD200: Permission denied" and Moonlight shows a
+            # black screen while wolf streams fine. Wolf's own default app
+            # config sets this variable; the fenrir operator does not. Never
+            # mattered on biggs.dog because NVIDIA device nodes are 0666.
+            - name: GOW_REQUIRED_DEVICES
+              value: /dev/uinput /dev/input/event* /dev/dri/*
           command:
             - /bin/bash
             - -c
