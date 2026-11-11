@@ -61,6 +61,21 @@ spec:
             limits:
               squat.ai/r9700-a: "1"
               memory: 10Gi
+          env:
+            # This fedora image uses GNOME glycin (the Rust replacement for
+            # the gdk-pixbuf loaders): every icon format is decoded by a
+            # loader binary spawned inside a bwrap + seccomp sandbox. This
+            # container is unprivileged, and bwrap cannot build the sandbox
+            # here ("Failed to make / slave: Permission denied"; bwrap exits
+            # 1, which glycin surfaces as "Loader process exited early with
+            # status '1'"). Loading the fallback image-missing icon then
+            # hits a hard GTK assertion and Firefox aborts at startup, so
+            # wolf streams an empty desktop: a black screen in Moonlight.
+            # glycin's official escape hatch for containers that cannot
+            # nest the sandbox (the loader still runs as its own process,
+            # just without the bubblewrap/seccomp wrapper).
+            - name: GLYCIN_DISABLE_SANDBOX
+              value: i-know-the-risks
           command:
             - /bin/bash
             - -c
@@ -88,8 +103,9 @@ spec:
               # The kubelet auto-creates this container's state/<app> subPath
               # directory as root:0750 at mount time (wolf has not created it
               # yet), so /home/retro is unwritable once the GOW entrypoint
-              # drops to uid 1000 and Firefox aborts (GTK icon loader crash)
-              # -> black screen. This container gets no PUID/PGID env (the
+              # drops to uid 1000: on a fresh state PVC Firefox dies with
+              # "mkdir: cannot create directory '/home/retro/.config':
+              # Permission denied". This container gets no PUID/PGID env (the
               # operator only injects those into the wolf container), so use
               # literal ids. The steam app's chown line is a silent no-op for
               # the same reason; its chmod is what actually fixes home there.
@@ -191,6 +207,12 @@ spec:
               value: "true"
             - name: PROTON_LOG
               value: "1"
+            # The steam image is fedora-based and ships the same GNOME
+            # glycin loader stack as the firefox app (see that app's
+            # GLYCIN_DISABLE_SANDBOX comment). Disable the sandbox here too
+            # so every app's icon decoding takes the same, proven path.
+            - name: GLYCIN_DISABLE_SANDBOX
+              value: i-know-the-risks
           command:
             - /bin/bash
             - -c
