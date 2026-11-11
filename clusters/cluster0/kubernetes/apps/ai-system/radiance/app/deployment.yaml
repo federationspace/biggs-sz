@@ -30,7 +30,13 @@ metadata:
   labels:
     app: radiance
 spec:
-  replicas: 1
+  # replicas is intentionally OMITTED: dreamcast/gpu-arbiter-instance owns the
+  # count, scaling Radiance to 0 while a game session pod exists and back to 1
+  # after. Declaring it here makes Flux scale Radiance back up mid-session on
+  # every reconcile (interval 3m). Unmanaged, a Deployment defaults to 1.
+  # To keep Radiance off for a while, suspend this Kustomization AND scale to
+  # 0 with --field-manager=flux-client-side-apply on the suspend; a plain
+  # kubectl patch of suspend is stripped by the next flux-system reconcile.
   # Never two pods holding the GPUs. New object, so Recreate is accepted
   # (switching an existing Deployment to it is rejected by server-side apply).
   strategy:

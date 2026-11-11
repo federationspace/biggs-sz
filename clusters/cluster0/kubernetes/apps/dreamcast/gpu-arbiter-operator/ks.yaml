@@ -1,0 +1,43 @@
+---
+# CRDs first, unpruned (repo convention for CRD Kustomizations): deleting
+# this app must not delete the CRD out from under a live GPUArbiter.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: gpu-arbiter-operator-crds
+  namespace: flux-system
+spec:
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: gpu-arbiter-operator-crds
+  path: ./clusters/cluster0/kubernetes/apps/dreamcast/gpu-arbiter-operator/crds
+  prune: false
+  force: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: false
+  interval: 3m
+  retryInterval: 1m
+  timeout: 2m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app gpu-arbiter-operator
+  namespace: flux-system
+spec:
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  path: ./clusters/cluster0/kubernetes/apps/dreamcast/gpu-arbiter-operator/app
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  interval: 3m
+  retryInterval: 1m
+  timeout: 2m
+  dependsOn:
+    - name: gpu-arbiter-operator-crds

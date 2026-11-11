@@ -1,0 +1,52 @@
+---
+# One arbitration policy for ai-00's two R9700s: Radiance (TP=2) holds both
+# cards, so it is scaled to 0 while any game session pod is non-terminal
+# (Pending, Running, CrashLoopBackOff all count) and back to 1 when none are.
+# The idle replica count is the operator's built-in 1, which is why
+# ai-system/radiance's Deployment declares no replicas: Flux would otherwise
+# scale it back up mid-session on every reconcile.
+#
+# Timing: the arbiter polls every 2 s, Radiance releases its VRAM within
+# ~10 s of SIGTERM (measured on node-exporter's card VRAM series), and each
+# App's wait-vram init waits up to 45 s for card A, so a cold session is
+# well inside the fenrir operator's 60 s session reaper.
+apiVersion: gpu.biggs.dog/v1alpha1
+kind: GPUArbiter
+metadata:
+  name: cluster0
+  labels:
+    app.kubernetes.io/name: gpu-arbiter
+    app.kubernetes.io/part-of: dreamcast
+spec:
+  # The CRD field is named after vLLM (what biggs.dog arbitrates); the value
+  # is just the Deployment to scale.
+  vllm:
+    namespace: ai-system
+    name: radiance
+  game:
+    namespace: dreamcast
+    labelSelector:
+      matchExpressions:
+        - key: app
+          operator: In
+          values:
+            - direwolf-worker
+  # Only used to lift a scheduling gate, and nothing injects one here (no
+  # MutatingAdmissionPolicy; wait-vram does that job). Kept because the CRD
+  # requires it.
+  gateName: gpu.biggs.dog/await-vram
+  metrics:
+    url: http://vmsingle-stack.observability.svc:8428
+    # Free MiB on the emptier R9700 (min, as on biggs.dog: Radiance holds
+    # both cards). Filtered by size, not card name: cardN shifts between
+    # boots and the 512 MiB iGPU reports the same series. Feeds status
+    # freeVRAMMiB only, since no gate is injected.
+    query: >-
+      min((node_drm_memory_vram_size_bytes{instance="192.168.2.90:9100"}
+      - node_drm_memory_vram_used_bytes{instance="192.168.2.90:9100"})
+      and on(card) (node_drm_memory_vram_size_bytes{instance="192.168.2.90:9100"} > 16e9))
+      / 1048576
+    timeoutSeconds: 4
+  freeMiB: 8000
+  timeoutSeconds: 45
+  intervalSeconds: 2

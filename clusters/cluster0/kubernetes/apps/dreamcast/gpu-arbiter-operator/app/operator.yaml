@@ -1,0 +1,231 @@
+---
+# gpu-arbiter-operator (github.com/shrinedogg/gpu-arbiter-operator), ported
+# from biggs.dog cluster1 dreamcast/gpu-arbiter-operator. Every 2 s it lists
+# non-terminal app=direwolf-worker pods in dreamcast and scales
+# ai-system/radiance to 0 while any exist, back to 1 when none do (see
+# gpu-arbiter-instance for the GPUArbiter CR).
+#
+# Deviations from biggs.dog:
+# - No ai-system Role/RoleBinding: the ClusterRole below already grants
+#   deployments + deployments/scale cluster-wide, so the namespaced pair was
+#   redundant there. The ClusterRole cannot be narrowed to namespaced Roles:
+#   the manager reads through controller-runtime's cached client, which
+#   starts cluster-wide informers for Pods and Deployments.
+# - Image pinned by digest (third-party image).
+# - The scheduling-gate MutatingAdmissionPolicy is not carried (it is
+#   commented out in biggs.dog too). Each App's wait-vram init container
+#   does that job here.
+#
+# ServiceAccount for the controller manager
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gpu-arbiter-controller-manager
+  namespace: dreamcast
+  labels:
+    app.kubernetes.io/name: gpu-arbiter-operator
+    app.kubernetes.io/part-of: gpu-arbiter
+    app.kubernetes.io/component: operator
+---
+# ClusterRole for the controller: pods, deployments (+ scale), gpuarbiters
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gpu-arbiter-manager-role
+  labels:
+    app.kubernetes.io/name: gpu-arbiter-operator
+    app.kubernetes.io/part-of: gpu-arbiter
+    app.kubernetes.io/component: operator
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+      - patch
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+      - deployments/scale
+    verbs:
+      - get
+      - list
+      - watch
+      - patch
+      - update
+  - apiGroups:
+      - gpu.biggs.dog
+    resources:
+      - gpuarbiters
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - gpu.biggs.dog
+    resources:
+      - gpuarbiters/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - gpu.biggs.dog
+    resources:
+      - gpuarbiters/status
+    verbs:
+      - get
+      - patch
+      - update
+---
+# ClusterRoleBinding: bind manager-role to the controller SA
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gpu-arbiter-manager-rolebinding
+  labels:
+    app.kubernetes.io/name: gpu-arbiter-operator
+    app.kubernetes.io/part-of: gpu-arbiter
+    app.kubernetes.io/component: operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gpu-arbiter-manager-role
+subjects:
+  - kind: ServiceAccount
+    name: gpu-arbiter-controller-manager
+    namespace: dreamcast
+---
+# Leader election Role, namespace-scoped to dreamcast
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gpu-arbiter-leader-election-role
+  namespace: dreamcast
+  labels:
+    app.kubernetes.io/name: gpu-arbiter-operator
+    app.kubernetes.io/part-of: gpu-arbiter
+    app.kubernetes.io/component: operator
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+---
+# Leader Election RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gpu-arbiter-leader-election-rolebinding
+  namespace: dreamcast
+  labels:
+    app.kubernetes.io/name: gpu-arbiter-operator
+    app.kubernetes.io/part-of: gpu-arbiter
+    app.kubernetes.io/component: operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gpu-arbiter-leader-election-role
+subjects:
+  - kind: ServiceAccount
+    name: gpu-arbiter-controller-manager
+    namespace: dreamcast
+---
+# Controller Manager Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-arbiter-controller-manager
+  namespace: dreamcast
+  labels:
+    app.kubernetes.io/name: gpu-arbiter-operator
+    app.kubernetes.io/part-of: gpu-arbiter
+    app.kubernetes.io/component: operator
+    app.kubernetes.io/managed-by: flux
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gpu-arbiter-operator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gpu-arbiter-operator
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+    spec:
+      serviceAccountName: gpu-arbiter-controller-manager
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: manager
+          image: docker.io/shrinedogg/gpu-arbiter-operator:v0.1.1@sha256:b1844203be6565838a2939350e164145e620577b21e972b6607be84a33856894
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - "ALL"
+            readOnlyRootFilesystem: true
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 25m
+              memory: 64Mi
+          ports:
+            - name: http-metrics
+              containerPort: 8080
+              protocol: TCP
+      terminationGracePeriodSeconds: 10
