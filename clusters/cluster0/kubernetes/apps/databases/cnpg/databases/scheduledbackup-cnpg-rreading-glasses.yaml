@@ -1,0 +1,16 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: cnpg-rreading-glasses-daily
+  namespace: cnpg-system
+spec:
+  # Staggered 10 minutes apart from cnpg-renovate (03:00) so base backups do
+  # not overlap (B4 of #261).
+  schedule: "0 50 3 * * *"
+  immediate: true
+  backupOwnerReference: self
+  cluster:
+    name: cnpg-rreading-glasses
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
