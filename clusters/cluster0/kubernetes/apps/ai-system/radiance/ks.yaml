@@ -41,12 +41,21 @@ spec:
       # release after 1.17.0, so move to it once the image is bumped.
       # Batched tokens and gpu-headroom take the engine defaults (2048, 96).
       #
+      # RADIANCE_MODEL is the .rad path on the PVC, not the repo id: radiance
+      # 1.17.0's hfget.sh sizes files with BusyBox `wc -c`, which wraps at
+      # 4 GiB, so any container over 4 GiB fails its size check on every start
+      # (30783856640 reads as 719085568) even when fully downloaded. A path
+      # skips hfget (and ignores --model-revision, kept to record what the file
+      # was fetched at). New models must be fetched onto the PVC first: a
+      # one-off pod on ai-00 mounting radiance-models, `curl -C -` in a loop
+      # (no --retry), then sha256sum against the HF listing's LFS oid.
+      #
       # Every value carries its own double quotes ('"..."'). Flux substitutes
       # AFTER kustomize has re-serialized the manifests, and kustomize writes
       # the "${VAR}" placeholders out unquoted, so a bare 2 would land as an
       # integer and container args must be strings (the apply is rejected).
       # Keep the inner quotes on every value, numbers and hex revisions alike.
-      RADIANCE_MODEL: '"StillDeadcode/qwen3.8-27b-fp8"'
+      RADIANCE_MODEL: '"/models/StillDeadcode/qwen3.8-27b-fp8/qwen3.8-27b-fp8.rad"'
       RADIANCE_MODEL_REVISION: '"edd43fda378af6b3b5e8981b6e936145be9608fd"'
       RADIANCE_SERVED_NAME: '"local"'
       RADIANCE_TP: '"2"'
