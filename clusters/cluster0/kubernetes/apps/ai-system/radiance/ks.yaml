@@ -34,22 +34,24 @@ spec:
       # engine repo's deploy/compose/<model>.yaml; flags a model does not set
       # take the engine default written here (gpu-headroom 96, batched 2048).
       #
-      # Bring-up: MiniCPM5-2B FP8 (3 GiB), to prove gfx1201 + TP=2 boot.
-      # Next (one follow-up PR): StillDeadcode/qwen3.8-27b-mxfp4 @
-      # 60bd4139f335205fbc120e5534329c30b691af0e, max-model-len 200000,
-      # gpu-headroom 96, max-num-batched-tokens 2048.
+      # Current: Qwen3.8-27B FP8 + DFlash2 drafter (28.7 GiB), flags from the
+      # engine's deploy/compose/qwen3.8-27b-fp8.yaml. Chosen over the MXFP4
+      # file (FP8 holds up better in practice, same speed); the IQ8R+DFlash2
+      # successor (StillDeadcode/qwen3.8-27b-iq8r-dflash) needs a radiance
+      # release after 1.17.0, so move to it once the image is bumped.
+      # Batched tokens and gpu-headroom take the engine defaults (2048, 96).
       #
       # Every value carries its own double quotes ('"..."'). Flux substitutes
       # AFTER kustomize has re-serialized the manifests, and kustomize writes
       # the "${VAR}" placeholders out unquoted, so a bare 2 would land as an
       # integer and container args must be strings (the apply is rejected).
       # Keep the inner quotes on every value, numbers and hex revisions alike.
-      RADIANCE_MODEL: '"StillDeadcode/minicpm5-2b-fp8"'
-      RADIANCE_MODEL_REVISION: '"2b60d4c417c0b0a06429f197f6b9eebcc6beab72"'
+      RADIANCE_MODEL: '"StillDeadcode/qwen3.8-27b-fp8"'
+      RADIANCE_MODEL_REVISION: '"edd43fda378af6b3b5e8981b6e936145be9608fd"'
       RADIANCE_SERVED_NAME: '"local"'
       RADIANCE_TP: '"2"'
       RADIANCE_MAX_NUM_SEQS: '"32"'
-      RADIANCE_MAX_MODEL_LEN: '"131072"'
+      RADIANCE_MAX_MODEL_LEN: '"200000"'
       RADIANCE_KV_CACHE_DTYPE: '"fp8"'
-      RADIANCE_GPU_HEADROOM_MIB: '"160"'
-      RADIANCE_MAX_NUM_BATCHED_TOKENS: '"512"'
+      RADIANCE_GPU_HEADROOM_MIB: '"96"'
+      RADIANCE_MAX_NUM_BATCHED_TOKENS: '"2048"'
