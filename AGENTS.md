@@ -129,10 +129,14 @@ kubernetes/apps/<ns>/<app>/
   driver, requests `gpu.intel.com/i915`) for hardware transcoding;
   `continuwuity` pins to `worker-01`.
 - **Hermes**: `hermes/hermes` is the Matrix bot (dashboard at
-  `hermes.gregbob.net`). `hermes/harness2` is a separate Harness² workbench
-  with its own PVC and dashboard (`harness2.gregbob.net`, own login) and no
-  Matrix token, by design; it shares only the bot's `config.yaml` and
-  `NOUS_API_KEY`. See `docs/runbooks/harness2.md`.
+  `hermes.gregbob.net`). It runs a custom build of the
+  `shrinedogg/hermes-agent` fork (branch `catalog-harness2`), pinned by
+  digest and excluded from Renovate: rebuild and re-pin by hand. The image
+  ships the harness2 plugin and seeds it into `/opt/data/plugins/harness2`
+  when that directory is absent; `plugins.enabled` in `hermes-config` turns
+  it on. harness2 probes run inside the bot's pod and can read its
+  environment. The separate Harness² workbench was retired. See
+  `docs/runbooks/harness2.md`.
 - **Auth**: `auth/pocket-id` is the OIDC provider (`id.gregbob.net`,
   passkey-only), backed by `cnpg-pocket-id`. Only infrastructure settings
   (URL, DB, encryption key) are in the manifests; Application Configuration

@@ -112,6 +112,14 @@ data:
         base_url: https://inference-api.nousresearch.com/v1
         key_env: NOUS_API_KEY
         model: ornith/ornith-1.5-122b:free
+
+    # harness2 plugin. The custom image seeds it into /opt/data/plugins/harness2
+    # at first boot (only when absent). This allow-list turns it on. It must
+    # live here: seed-config overwrites /opt/data/config.yaml on every boot.
+    # plugins.disabled, if ever added, wins over this list.
+    plugins:
+      enabled:
+        - harness2
   SOUL.md: |
     # Hermes -- biggs-sz cluster assistant
 

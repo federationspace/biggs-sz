@@ -26,7 +26,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 10Gi
+      storage: 20Gi
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -55,7 +55,7 @@ spec:
         # only at pod start, so a ConfigMap edit alone never reaches the
         # running gateway. Bump this value in the same commit as any
         # configmap.yaml change to roll the pod and re-seed the config.
-        hermes.gregbob.net/config-revision: "3"
+        hermes.gregbob.net/config-revision: "4"
     spec:
       serviceAccountName: hermes
       terminationGracePeriodSeconds: 30
@@ -148,7 +148,19 @@ spec:
               memory: 64Mi
       containers:
         - name: hermes
-          image: docker.io/nousresearch/hermes-agent:v2026.9.24
+          # Custom build of github.com/shrinedogg/hermes-agent, branch
+          # build/dockerhub-catalog-harness2-2ddca67 (= catalog-harness2 @ 2ddca67
+          # + the harness2 plugin vendored @ shrinedogg/harness2-hermes 61bbac1).
+          # The image copies the plugin to /opt/data/plugins/harness2 at first
+          # boot, only when absent. amd64 only. Digest from the build run.
+          # Excluded from Renovate; rebuild and re-pin by hand.
+          #
+          # PENDING BUILD: the agent has no push access to
+          # shrinedogg/hermes-agent, so the image is not published yet. Replace
+          # the line below with
+          #   docker.io/shrinedogg/hermes-agent:catalog-harness2-<BUILD_SHA7>@sha256:<DIGEST>
+          # once the build runs (see PR body + hermes-agent-build-branch.patch).
+          image: docker.io/shrinedogg/hermes-agent:catalog-harness2-PENDING-BUILD
           imagePullPolicy: IfNotPresent
           args: ["gateway", "run"]
           env:

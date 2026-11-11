@@ -160,6 +160,12 @@
       "matchDatasources": ["docker"],
       "matchPackageNames": ["/^(docker\\.io|lscr\\.io|ghcr\\.io)/linuxserver//"],
       "automerge": false
+    },
+    {
+      "description": "Custom catalog-harness2 build of hermes-agent: built by hand on the fork and pinned by digest. Renovate must not propose bumps.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["/(^|/)shrinedogg/hermes-agent$/"],
+      "enabled": false
     }
   ]
 }
