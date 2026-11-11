@@ -1,0 +1,47 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cnpg-silo
+  namespace: cnpg-system
+spec:
+  # 3-instance HA cluster. local-path welds an instance to the node it first
+  # lands on, so `required` anti-affinity spreads one per node (see
+  # cnpg-pocket-id); 4 untainted nodes for 3 instances, so a drained node
+  # still leaves a quorum.
+  instances: 3
+  affinity:
+    enablePodAntiAffinity: true
+    podAntiAffinityType: required
+  bootstrap:
+    initdb:
+      database: silo
+      owner: silo
+      dataChecksums: true
+      secret:
+        name: silo-user-password
+  # Minimal trixie operand + extension images from the official CNPG catalog
+  # (../catalog/postgresql-minimal-trixie-catalog.yaml). Enables pgvector by
+  # name; the extension itself is created by the Database object below.
+  imageCatalogRef:
+    apiGroup: postgresql.cnpg.io
+    kind: ClusterImageCatalog
+    name: postgresql-minimal-trixie
+    major: 18
+  resources:
+    requests:
+      memory: 1Gi
+      cpu: 250m
+    limits:
+      memory: 4Gi
+  storage:
+    size: 20Gi
+    storageClass: local-path
+  # Barman Cloud plugin: WAL archiving to the offsite ObjectStore (B2).
+  plugins:
+  - name: barman-cloud.cloudnative-pg.io
+    isWALArchiver: true
+    parameters:
+      barmanObjectName: offsite
+  postgresql:
+    extensions:
+      - name: pgvector

@@ -1,0 +1,60 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: silo-valkey
+  namespace: media
+  labels:
+    app: silo-valkey
+spec:
+  # Silo uses Redis purely as a cache (sessions, queues); state is
+  # disposable, so no persistence and a single replica.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: silo-valkey
+  template:
+    metadata:
+      labels:
+        app: silo-valkey
+    spec:
+      containers:
+      - name: valkey
+        image: valkey/valkey:9-alpine
+        imagePullPolicy: IfNotPresent
+        ports:
+          - name: valkey
+            containerPort: 6379
+            protocol: TCP
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            memory: 256Mi
+        livenessProbe:
+          tcpSocket:
+            port: valkey
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          tcpSocket:
+            port: valkey
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: silo-valkey
+  namespace: media
+spec:
+  type: ClusterIP
+  selector:
+    app: silo-valkey
+  ports:
+  - name: valkey
+    port: 6379
+    protocol: TCP
+    targetPort: 6379
