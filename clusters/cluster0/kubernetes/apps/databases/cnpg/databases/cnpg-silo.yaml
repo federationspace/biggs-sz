@@ -19,9 +19,12 @@ spec:
       dataChecksums: true
       secret:
         name: silo-user-password
-  # Minimal trixie operand + extension images from the official CNPG catalog
-  # (../catalog/postgresql-minimal-trixie-catalog.yaml). Enables pgvector by
-  # name; the extension itself is created by the Database object below.
+  # Trixie operand + extension images from the official CNPG catalog
+  # (../catalog/postgresql-minimal-trixie-catalog.yaml).
+  # Major 18 resolves to the STANDARD operand (pgvector 0.8.2 baked in):
+  # the catalog's extension images only attach via k8s ImageVolumes, which
+  # are alpha and disabled on this cluster's k3s 1.34. The Database object
+  # below runs CREATE EXTENSION as superuser.
   imageCatalogRef:
     apiGroup: postgresql.cnpg.io
     kind: ClusterImageCatalog
