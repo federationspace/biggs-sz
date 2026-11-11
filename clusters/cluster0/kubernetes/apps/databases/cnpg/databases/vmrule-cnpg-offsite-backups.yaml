@@ -1,0 +1,97 @@
+---
+# Alerting for the CNPG offsite backup path (issue #261, B5).
+#
+# Metric names were verified by scraping a live instance pod on 2026-11-11
+# (:9187/metrics), not guessed. Findings:
+#
+#   barman_cloud_cloudnative_pg_io_last_available_backup_timestamp
+#       unix time of the newest successful base backup in the B2 catalog,
+#       contributed by the Barman Cloud sidecar to the same 9187 endpoint.
+#       0 until the first backup completes.
+#   barman_cloud_cloudnative_pg_io_last_failed_backup_timestamp
+#       unix time of the newest FAILED backup. Deliberately NOT used in
+#       these rules: it is a sticky gauge, so a one-off failed run (the
+#       B4 rollout races set it on every cluster) would keep alerting
+#       until the next successful run overwrites it. A missed run is
+#       already caught by CNPGBackupStale.
+#   cnpg_collector_last_available/failed_backup_timestamp
+#       the core collector's equivalents; CNPG-deprecated and not
+#       populated in plugin mode (observed 0 on cnpg-renovate, whose
+#       backups all go through the sidecar).
+#
+# WAL archiving is observed through PostgreSQL's own pg_stat_archiver
+# (exposed as cnpg_pg_stat_archiver_*). It tracks the archiver CNPG
+# invokes on every WAL switch: the barman sidecar on enrolled clusters,
+# the local archive directory on unenrolled ones (cnpg-homarr, pending
+# #261 Q3), so a stuck archiver is caught either way.
+#
+# Every rule evaluates the primary only (cnpg_role="primary", set by the
+# VMPodScrape relabel from the pod's `role` label), so each cluster
+# produces at most one alert per rule. severity: warning routes to the
+# Mercury room via matrix-alertmanager-receiver (info/none are blackholed).
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: cnpg-offsite-backups
+  namespace: cnpg-system
+spec:
+  groups:
+    - name: cnpg.rules.offsite-backups
+      rules:
+        - alert: CNPGBackupStale
+          # Daily base backups run 03:00-03:50 UTC. 26h after the last
+          # success (~2h after a missed run) is the detection point.
+          # A freshly enrolled cluster with no backup yet reports 0 and
+          # fires until its first backup completes: intended.
+          expr: >
+            time() - barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{cnpg_role="primary"}
+            > 26 * 3600
+          labels:
+            severity: warning
+          annotations:
+            summary: "CNPG {{ $labels.cnpg_cluster }}: no successful backup in over 26h"
+            description: >-
+              The last successful Barman Cloud base backup of
+              {{ $labels.cnpg_cluster }} is {{ $value | humanizeDuration }} old.
+              Daily backups run 03:00-03:50 UTC, so a missed run means today's
+              restore point may be missing. Check the barman sidecar logs on
+              {{ $labels.pod }} and the bucket path
+              s3://biggs-sz-cnpg/{{ $labels.cnpg_cluster }}/.
+        - alert: CNPGWALArchiveFailing
+          # Any archive failure in the last hour. Keyed on the
+          # last-failure timestamp, NOT on
+          # increase(cnpg_pg_stat_archiver_failed_count[...]): pg_stat
+          # counters are persisted across restarts (PG15+) and the series
+          # starts fresh on every switchover, so an increase over a window
+          # that begins mid-history reads the whole accumulated count as a
+          # jump (verified 2026-11-11: the B4 rollout races showed up as a
+          # fresh increase 3h later, when this scrape first started).
+          # A single blip that heals on the next retry stays quiet for the
+          # remainder of its hour, then clears.
+          expr: >
+            (time() - cnpg_pg_stat_archiver_last_failed_time{cnpg_role="primary"}) < 3600
+          labels:
+            severity: warning
+          annotations:
+            summary: "CNPG {{ $labels.cnpg_cluster }}: WAL archiving failing"
+            description: >-
+              A WAL archive attempt on {{ $labels.cnpg_cluster }} failed
+              {{ $value | humanizeDuration }} ago. While archiving fails,
+              point-in-time recovery before the outage is lost. Check the
+              barman sidecar logs on {{ $labels.pod }}.
+        - alert: CNPGWALArchiveStuck
+          # Segments waiting in pg_wal/archive_status for 30m: the archiver
+          # is not making progress. Complements CNPGWALArchiveFailing,
+          # which misses a hung (rather than failing) upload.
+          expr: >
+            cnpg_collector_pg_wal_archive_status{value="ready", cnpg_role="primary"} > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "CNPG {{ $labels.cnpg_cluster }}: WAL archiving stuck"
+            description: >-
+              {{ $value | humanize }} WAL segment(s) on {{ $labels.cnpg_cluster }}
+              have waited over 30m to be archived. PITR is degraded until this
+              drains. Check the barman sidecar logs on {{ $labels.pod }} and
+              B2 connectivity from the cluster.
