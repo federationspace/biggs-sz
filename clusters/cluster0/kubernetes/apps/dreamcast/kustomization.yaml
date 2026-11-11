@@ -7,3 +7,5 @@ resources:
   # Flux-Kustomizations
   - ./fenrir-crds/ks.yaml
   - ./fenrir/ks.yaml
+  - ./gpu-arbiter-operator/ks.yaml
+  - ./gpu-arbiter-instance/ks.yaml

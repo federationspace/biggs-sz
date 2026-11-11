@@ -116,7 +116,9 @@ kubernetes/apps/<ns>/<app>/
   game container, 2 per session of the 8 slots) and each App's `wait-vram`
   init container blocks until Radiance has released card A
   (`/sys/bus/pci/devices/0000:03:00.0/mem_info_vram_used`); the GPU arbiter
-  (PR 4) scales Radiance to 0 while sessions run. The game container must
+  (`dreamcast/gpu-arbiter-*`, a port of biggs.dog's) scales Radiance to 0
+  while any `app=direwolf-worker` pod is non-terminal and back to 1 after,
+  which is why the Radiance Deployment declares no `replicas`. The game container must
   keep its `resources` at or under the User policy -- the operator validates
   them and they are what the scheduler caps (4 concurrent sessions).
 - The control plane hosts media pods on purpose: downloads stage on the
