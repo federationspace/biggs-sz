@@ -8,8 +8,9 @@ metadata:
 spec:
   # v0.1.8-amd.1 (P0): skip the operator's NVIDIA game-container env block
   # (LIBVA_DRIVER_NAME=nvidia, NVIDIA_*), which would force broken paths on
-  # the R9700; the VA-API radeonsi driver is selected via WOLF_RENDER_NODE
-  # in the wolf policy below.
+  # the R9700. The VA-API radeonsi path is selected by pinning the render
+  # node per app via wolfConfig.runtimeVariables.renderNode (apps.yaml),
+  # which the operator turns into WOLF_RENDER_NODE on the wolf container.
   gpuVendor: amd
   # Game-container policy. The App CRs (apps.yaml) must declare their own
   # resources at or under this policy (the operator validates them, and the
@@ -58,12 +59,12 @@ spec:
   sidecarPolicies:
     wolf:
       env:
-        # Fixed render-node path: the generic-device-plugin mounts both
-        # card resources (r9700-a/b) at /dev/dri/renderD200, so wolf and the
-        # game container always see the same path whichever card was
-        # allocated.
-        - name: WOLF_RENDER_NODE
-          value: /dev/dri/renderD200
+        # Do NOT add WOLF_RENDER_NODE here: apps.yaml already pins it via
+        # wolfConfig.runtimeVariables.renderNode, and the operator merges
+        # both into the wolf container's env. Server-side apply rejects the
+        # duplicate ("duplicate entries for key [name=WOLF_RENDER_NODE]")
+        # and the session Deployment is never created, so Moonlight fails
+        # with a transfer error. Same listType=map rule as PUID/PGID above.
         # The HDR/HEVC Main10 chain (wolf v0.2.0) stays dormant unless this
         # env is the exact string "TRUE" (configTOML.cpp string compare);
         # quoted so YAML does not coerce unquoted TRUE to boolean true ->
@@ -77,8 +78,9 @@ spec:
       # Privileged so wolf's uinput hotplug devices are admitted into the
       # pod-private /dev/input (operator v0.1.3+ scope); the app container
       # is privileged for the same class of reason, so this widens nothing
-      # new. On ai-00 it also exposes the host's /dev/dri, keeping
-      # WOLF_RENDER_NODE present even if the allocation ever changes.
+      # new. On ai-00 it also exposes the host's /dev/dri, keeping the
+      # renderD200 node pinned in apps.yaml present even if the allocation
+      # ever changes.
       securityContext:
         privileged: true
       resources:
