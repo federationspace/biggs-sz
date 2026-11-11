@@ -1,0 +1,401 @@
+---
+# yaml-language-server: $schema=https://github.com/games-on-whales/fenrir/raw/refs/heads/main/schemas/direwolf.games-on-whales.github.io/app_v1alpha1.json
+# Adapted from the biggs.dog firefox App (upstream
+# examples/nvidia_devices/firefox.yaml), minus NVIDIA. appAssetWebP is
+# required by the CRD; the upstream ~370KB poster is replaced with a tiny
+# generated 300x400 solid-color WebP placeholder.
+apiVersion: direwolf.games-on-whales.github.io/v1alpha1
+kind: App
+metadata:
+  name: firefox
+  namespace: dreamcast
+spec:
+  appAssetWebP: UklGRhwBAABXRUJQVlA4IBABAADQHACdASosAZABPm02mUmkIqKhICgAgA2JaW7hd2EbQAnsA99snIe+2Yy09snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPekAAD+/9O4f/1K366KRn9B8NO3tyIAAAAAAAAAAAAAAAAAAA==
+  id: 1
+  isHDRSupported: true
+  title: Firefox
+  # Empty spec -> default local-path StorageClass, operator's 5Gi default.
+  volumeClaimTemplate:
+    spec: {}
+  wolfConfig:
+    runtimeVariables:
+      # Fixed render-node path: the generic-device-plugin mounts both R9700
+      # resources at /dev/dri/renderD200. Pinning it keeps the whole session
+      # on one card: wolf's compositor and VA-API encoder run there and the
+      # nested Sway follows wolf's dmabuf device. Both the wolf sidecar and
+      # the app container are privileged, so the node is always present
+      # whatever the device plugin allocated; if it ever is not
+      # (unprivileged sidecar), the wolf-root-entrypoint ConfigMap re-points
+      # WOLF_RENDER_NODE at the injected node. A wrong/missing node means
+      # wolf can't detect the GPU vendor, falls back to software encoding,
+      # and the Wayland display never starts (no video in Moonlight).
+      renderNode: /dev/dri/renderD200
+  template:
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: ai-00
+      tolerations:
+        - key: amd.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      # Block until Radiance has released card A (see wait-vram.yaml).
+      initContainers:
+        - name: wait-vram
+          image: docker.io/library/busybox:1.37.0@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
+          command:
+            - /scripts/wait-vram.sh
+          volumeMounts:
+            - name: wait-vram
+              mountPath: /scripts
+      containers:
+        - name: app
+          image: ghcr.io/games-on-whales/firefox:fedora
+          # The 4-session scheduler cap only holds if the game container
+          # declares its own resources (see users.yaml for the policy these
+          # must sit within).
+          resources:
+            requests:
+              squat.ai/r9700-a: "1"
+              cpu: "2"
+              memory: 6Gi
+            limits:
+              squat.ai/r9700-a: "1"
+              memory: 10Gi
+          command:
+            - /bin/bash
+            - -c
+            - |
+              cleanup() {
+                echo "Cleaning up..." >&2
+                exit 0
+              }
+              trap cleanup SIGINT SIGTERM
+
+              # Wait for wayland display to be available
+              while [ ! -S $XDG_RUNTIME_DIR/$WAYLAND_DISPLAY ]; do
+                echo "Waiting for wayland display..." >&2
+                sleep 1
+              done
+
+              while [ ! -S $XDG_RUNTIME_DIR/pulse-socket ]; do
+                echo "Waiting for pulse socket..." >&2
+                sleep 1
+              done
+
+              export PULSE_SINK="$(pactl list sinks short | awk '$2 ~ /^virtual_sink/ {print $2; exit}')"
+              export PULSE_SOURCE="${PULSE_SINK}.monitor"
+              exec /entrypoint.sh
+---
+# Ported from the biggs.dog steam App, minus the NVIDIA-specific pieces:
+# no nvngx-bridge init container, no PROTON_ENABLE_NVAPI /
+# DXVK_ENABLE_NVAPI / VK_DRIVER_FILES / GBM_BACKENDS_PATH env (Mesa RADV is
+# the default ICD; the privileged container sees card A first, matching the
+# render node wolf pins). Same placeholder poster as firefox.
+apiVersion: direwolf.games-on-whales.github.io/v1alpha1
+kind: App
+metadata:
+  name: steam
+  namespace: dreamcast
+spec:
+  appAssetWebP: UklGRhwBAABXRUJQVlA4IBABAADQHACdASosAZABPm02mUmkIqKhICgAgA2JaW7hd2EbQAnsA99snIe+2Yy09snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPfbJyHvtk5D32ych77ZOQ99snIe+2TkPekAAD+/9O4f/1K366KRn9B8NO3tyIAAAAAAAAAAAAAAAAAAA==
+  id: 2
+  isHDRSupported: true
+  title: Steam
+  # Persists /home/retro (Steam login, library, installed games) across
+  # sessions; without it the operator uses an ephemeral emptyDir. Default
+  # local-path StorageClass; 500Gi leaves room for the library on the 1 TB
+  # T705 (OS+images ~150 GB, radiance model PVC 150 Gi, ~100 GiB spare --
+  # local-path does not enforce sizes, watch node_filesystem_avail_bytes).
+  volumeClaimTemplate:
+    spec:
+      resources:
+        requests:
+          storage: 500Gi
+  template:
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: ai-00
+      tolerations:
+        - key: amd.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      hostIPC: true
+      # Block until Radiance has released card A (see wait-vram.yaml).
+      initContainers:
+        - name: wait-vram
+          image: docker.io/library/busybox:1.37.0@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
+          command:
+            - /scripts/wait-vram.sh
+          volumeMounts:
+            - name: wait-vram
+              mountPath: /scripts
+      containers:
+        - name: app
+          # biggs.dog pins fedora-43; edge is the conscious choice here
+          # (pinned by digest), re-verify pairing on it.
+          image: ghcr.io/games-on-whales/steam:edge@sha256:7e2731e86bb7d49c66c8018e7df10e5d3dd9fc176c98fafbdbc727d3f4cababb
+          # The 4-session scheduler cap only holds if the game container
+          # declares its own resources (see users.yaml for the policy these
+          # must sit within).
+          resources:
+            requests:
+              squat.ai/r9700-a: "1"
+              cpu: "2"
+              memory: 6Gi
+            limits:
+              squat.ai/r9700-a: "1"
+              memory: 10Gi
+          securityContext:
+            # Privileged is required for controller input: wolf hotplugs
+            # uinput devices mid-session and the container's device cgroup
+            # denies open() on /dev/input/event* ("Operation not permitted").
+            # Kubernetes has no equivalent of Docker's device_cgroup_rules
+            # (c 13:* rmw), so privileged is the only way to admit devices
+            # that do not exist at container start.
+            privileged: true
+            capabilities:
+              add:
+                [
+                  "SYS_ADMIN",
+                  "SYS_NICE",
+                  "SYS_PTRACE",
+                  "NET_RAW",
+                  "MKNOD",
+                  "NET_ADMIN",
+                ]
+            seccompProfile:
+              type: Unconfined
+            appArmorProfile:
+              type: Unconfined
+            allowPrivilegeEscalation: true
+            runAsUser: 0
+            runAsGroup: 0
+          env:
+            # Sway (not gamescope): gamescope's WSI 10-bit output path has
+            # no AMD equivalent of the NVIDIA 615 EGL import breakage that
+            # forced RUN_SWAY on biggs.dog, but sway is the proven path
+            # here. NOTE: RUN_GAMESCOPE must stay ABSENT (the gow startup
+            # scripts test -n, so "false" still enables gamescope).
+            - name: RUN_SWAY
+              value: "true"
+            - name: PROTON_LOG
+              value: "1"
+          command:
+            - /bin/bash
+            - -c
+            - |
+              cleanup() {
+                echo "Cleaning up..." >&2
+                exit 0
+              }
+              trap cleanup SIGINT SIGTERM
+
+              # Wait for wayland display to be available
+              while [ ! -S $XDG_RUNTIME_DIR/$WAYLAND_DISPLAY ]; do
+                echo "Waiting for wayland display..." >&2
+                sleep 1
+              done
+
+              while [ ! -S $XDG_RUNTIME_DIR/pulse-socket ]; do
+                echo "Waiting for pulse socket..." >&2
+                sleep 1
+              done
+
+              # Sway fullscreen rule: the GOW base sway config (see
+              # launch-comp.sh) does NOT fullscreen app windows, so Sway tiles
+              # every Xwayland surface it sees. Games like Windrose launch as
+              # MULTIPLE windows (Steam Big Picture class="steam" + the game
+              # class="steam_app_*" + transient launchers), which Sway tiles
+              # side-by-side into the "split / multiple tiles" display. The
+              # base config includes /home/retro/.config/sway/custom-cfg at
+              # the top, which launch-comp's cp does NOT overwrite -- so
+              # writing our rule there is the clean injection point.
+              # Fullscreen both Steam BPM and the game so each takes the
+              # whole output (BPM behind, game front).
+              mkdir -p /home/retro/.config/sway
+              cat > /home/retro/.config/sway/custom-cfg <<'SWAYEOF'
+              for_window [class="steam_app_*"] fullscreen enable
+              for_window [class="steam"] fullscreen enable
+              SWAYEOF
+
+              # Do NOT export PULSE_SINK/PULSE_SOURCE here: this image has
+              # no pactl, so the old lookup exported PULSE_SINK="" and
+              # PULSE_SOURCE=".monitor". libpulse treats a set-but-bogus
+              # device name as an explicit request and fails the stream
+              # instead of falling back, leaving Steam silent. The wolf
+              # pulseaudio server already makes the session's virtual sink
+              # the default sink.
+
+              # NOTE: in-pod systemd-udevd + udevadm trigger REMOVED (was
+              # here for Steam Input's emulated pads). With the pod-private
+              # /dev/input (operator v0.1.3+) session input discovery is the
+              # wolf-agent's job alone: it writes the udev db entries and
+              # broadcasts the netlink events for THIS session's devices.
+              # The old `udevadm trigger` replayed HOST-wide sysfs, which
+              # re-created nodes for every other session's pads inside this
+              # pod (the exact leak the private /dev/input exists to stop).
+              # Steam Input's own uinput pads are kernel-global with no
+              # creator identity in their uevents, so they can never be
+              # scoped per session: they get no node here by design. Games
+              # must read the wolf pad directly -> set the game's controller
+              # override to "Disable Steam Input" (BPM: game > gear icon >
+              # Controller Options), otherwise Steam grabs the wolf pad and
+              # re-emits it as a pad this pod cannot see (menu works, game
+              # sees no controller).
+
+              # Focus guard (sway only): Steam's steamwebhelper maps an
+              # invisible, unnamed, class-less notification popup (role
+              # "popup", _NET_WM_WINDOW_TYPE_NOTIFICATION) that grabs X input
+              # focus away from the running game. Gamescope pins focus to the
+              # game so it is immune; sway honors the client-side
+              # XSetInputFocus and keyboard + Steam Input controller routing
+              # both break (input lands in the popup, Steam thinks BPM is
+              # foreground). The guard polls X focus and, while a viewable
+              # steam_app_* window exists, returns focus to it whenever an
+              # unnamed/class-less window holds it. Legitimate focus changes
+              # (BPM has WM_CLASS steamwebhelper) are untouched.
+              cat > /tmp/focus-guard.py <<'PYEOF'
+              import time
+              from Xlib import display, X
+
+              def viewable_game(d):
+                  for w in d.screen().root.query_tree().children:
+                      try:
+                          cls = w.get_wm_class()
+                          if cls and cls[0].startswith("steam_app_") \
+                                  and w.get_attributes().map_state == X.IsViewable:
+                              return w
+                      except Exception:
+                          pass
+                  return None
+
+              while True:
+                  try:
+                      d = display.Display()
+                      while True:
+                          game = viewable_game(d)
+                          if game is not None:
+                              f = d.get_input_focus().focus
+                              if getattr(f, "id", None) not in (None, game.id):
+                                  try:
+                                      cls = f.get_wm_class()
+                                      name = f.get_wm_name()
+                                  except Exception:
+                                      cls = name = None
+                                  if not cls and not name:
+                                      d.set_input_focus(game, X.RevertToParent,
+                                                        X.CurrentTime)
+                                      d.sync()
+                          time.sleep(1)
+                  except Exception:
+                      time.sleep(5)
+              PYEOF
+              if [ "$RUN_SWAY" = "true" ]; then
+                (
+                  while [ ! -S /tmp/.X11-unix/X0 ]; do sleep 2; done
+                  exec runuser -u ${UNAME:-retro} -- env DISPLAY=:0 python3 /tmp/focus-guard.py
+                ) &
+              fi
+
+              # Fullscreen watcher (sway only): for_window
+              # [class="steam_app_*"] in custom-cfg does NOT reliably fire
+              # for Xwayland windows because their WM_CLASS is set AFTER the
+              # map event, so the criterion misses at creation time
+              # (verified: the rule is loaded but the game window stays
+              # fullscreen_mode=0). This watcher polls the sway tree and,
+              # once a steam_app_* window exists, runs the fullscreen command
+              # directly (idempotent). Matches the focus-guard pattern above.
+              # Also fullscreens Steam Big Picture (class="steam") so BPM
+              # isn't tiled behind the game. The tree check lives in a script
+              # file: an inline python3 -c with "\n" inside bash double
+              # quotes passes the backslashes literally, so the one-liner
+              # was a SyntaxError every 2s and the watcher never
+              # fullscreened anything.
+              cat > /tmp/sway-has-steam.py <<'PYEOF'
+              import json
+              import sys
+
+              tree = json.load(sys.stdin)
+              found = False
+
+              def walk(node):
+                  global found
+                  if not isinstance(node, dict):
+                      return
+                  props = node.get("window_properties") or {}
+                  cls = props.get("class") or ""
+                  appid = node.get("app_id") or ""
+                  # X11 games carry WM_CLASS (steam_app_*). PROTON_ENABLE_WAYLAND
+                  # games are native xdg_shell clients whose app_id is the .exe
+                  # name and have NO window_properties at all.
+                  if node.get("type") == "con" and (cls.startswith("steam") or appid.endswith(".exe")):
+                      found = True
+                  for key in ("nodes", "floating_nodes"):
+                      for child in node.get(key) or []:
+                          walk(child)
+
+              walk(tree)
+              sys.exit(0 if found else 1)
+              PYEOF
+              if [ "$RUN_SWAY" = "true" ]; then
+                (
+                  while [ ! -S /tmp/.X11-unix/sway.socket ]; do sleep 2; done
+                  while true; do
+                    if SWAYSOCK=/tmp/.X11-unix/sway.socket swaymsg -t get_tree 2>/dev/null | \
+                       python3 /tmp/sway-has-steam.py; then
+                      SWAYSOCK=/tmp/.X11-unix/sway.socket swaymsg '[class="steam_app_*"] fullscreen enable' >/dev/null 2>&1 || true
+                      SWAYSOCK=/tmp/.X11-unix/sway.socket swaymsg '[class="steam"] fullscreen enable' >/dev/null 2>&1 || true
+                      # Wayland-native games (PROTON_ENABLE_WAYLAND): match by
+                      # app_id and keep the game focused -- an occluded Wayland
+                      # game pauses rendering (DXGI occlusion), which reads as a
+                      # black/frozen stream. sway 1.11 has no color management
+                      # (no wp_color_management_v1), so these games stay SDR
+                      # even with PROTON_ENABLE_HDR set.
+                      SWAYSOCK=/tmp/.X11-unix/sway.socket swaymsg '[app_id=".*\.exe"] fullscreen enable' >/dev/null 2>&1 || true
+                      SWAYSOCK=/tmp/.X11-unix/sway.socket swaymsg '[app_id=".*\.exe"] focus' >/dev/null 2>&1 || true
+                    fi
+                    sleep 2
+                  done
+                ) &
+              fi
+
+              chown -R $PUID:$PGID /home/retro
+              chmod -R 777 /home/retro
+              exec /entrypoint.sh
+          volumeMounts:
+            - name: uinput
+              mountPath: /dev/uinput
+            # /dev/input is NOT mounted here: the operator (v0.1.3+) gives
+            # every session pod a pod-private emptyDir at /dev/input and the
+            # wolf-agent mknods only this session's input devices into it.
+            # Mounting the host's /dev/input leaked every other session's
+            # uinput controllers into this pod (duplicate pads, cross-input).
+            # Steam's CEF UI (steamwebhelper) allocates its GPU command
+            # buffers in /dev/shm; the container-runtime default of 64Mi
+            # fills instantly and Big Picture renders nothing (black screen
+            # with cursor).
+            - name: dshm
+              mountPath: /dev/shm
+            # udev database written by the wolf-agent (fake-udev) so
+            # SDL/Steam detect the virtual controllers wolf hotplugs. The
+            # volume is defined in the User spec (users.yaml) and shared
+            # across the pod.
+            - name: udev-data
+              mountPath: /run/udev
+      volumes:
+        - name: uinput
+          hostPath:
+            path: /dev/uinput
+            type: CharDevice
+        # input-events (hostPath /dev/input) not mounted: the operator
+        # (v0.1.3+) always creates a pod-private emptyDir at /dev/input. See
+        # the volumeMounts comment above.
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Gi
+  wolfConfig:
+    runtimeVariables:
+      # See the firefox app above: pins the session to the allocated R9700's
+      # fixed render-node path.
+      renderNode: /dev/dri/renderD200

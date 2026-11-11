@@ -23,3 +23,5 @@ resources:
   - kube-prometheus-repo.yaml
   - amd-gpu-repo.yaml
   - oauth2-proxy-repo.yaml
+  - fenrir-git.yaml
+  - fenrir-oci.yaml

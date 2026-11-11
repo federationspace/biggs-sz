@@ -1,0 +1,103 @@
+---
+# yaml-language-server: $schema=https://github.com/games-on-whales/fenrir/raw/refs/heads/main/schemas/direwolf.games-on-whales.github.io/user_v1alpha1.json
+apiVersion: direwolf.games-on-whales.github.io/v1alpha1
+kind: User
+metadata:
+  name: szkud
+  namespace: dreamcast
+spec:
+  # v0.1.8-amd.1 (P0): skip the operator's NVIDIA game-container env block
+  # (LIBVA_DRIVER_NAME=nvidia, NVIDIA_*), which would force broken paths on
+  # the R9700; the VA-API radeonsi driver is selected via WOLF_RENDER_NODE
+  # in the wolf policy below.
+  gpuVendor: amd
+  # Game-container policy. The App CRs (apps.yaml) must declare their own
+  # resources at or under this policy (the operator validates them, and the
+  # app values are what the scheduler actually sees); together with the
+  # wolf sidecar (0.5 cpu / 1Gi) this caps ai-00 at 4 concurrent sessions.
+  resources:
+    requests:
+      squat.ai/r9700-a: "1"
+      cpu: "2"
+      memory: 6Gi
+    limits:
+      squat.ai/r9700-a: "1"
+      memory: 10Gi
+  # wolf:stable must start as root: its supervisord.conf has user=root and
+  # drops privileges per-program itself, but the operator hardcodes
+  # PUID=1000/UNAME=ubuntu into the wolf container, so the GOW entrypoint
+  # gosu's to a non-root user before supervisord runs -> "Can't drop
+  # privilege as nonroot user" crash loop.
+  #
+  # Do NOT fix this by re-declaring PUID/PGID/UNAME in the policy env: the
+  # operator builds the Deployment with server-side apply and env is a
+  # listType=map keyed by name, so duplicate names are rejected outright
+  # ("duplicate entries for key [name=PUID]") and the session Deployment is
+  # never created -- Moonlight then hangs until it times out. Instead,
+  # shadow the GOW /entrypoint.sh with a wrapper that forces root and skips
+  # gosu (see wolf-entrypoint.yaml).
+  volumes:
+    - name: wolf-root-entrypoint
+      configMap:
+        name: wolf-root-entrypoint
+        defaultMode: 0755
+    # Polls card A's sysfs VRAM counter until Radiance has released the
+    # card (see wait-vram.yaml); each App's wait-vram init container mounts
+    # it at /scripts.
+    - name: wait-vram
+      configMap:
+        name: wait-vram
+        defaultMode: 0755
+    # Pod-local udev database shared between the wolf-agent (writer) and the
+    # app container (reader, mounted at /run/udev). The agent plays the role
+    # of wolf's fake-udev: kernel uevents for the uinput devices wolf creates
+    # are only delivered in the host's network namespace, so without this
+    # SDL/Steam never detect hotplugged controllers.
+    - name: udev-data
+      emptyDir: {}
+  sidecarPolicies:
+    wolf:
+      env:
+        # Fixed render-node path: the generic-device-plugin mounts both
+        # card resources (r9700-a/b) at /dev/dri/renderD200, so wolf and the
+        # game container always see the same path whichever card was
+        # allocated.
+        - name: WOLF_RENDER_NODE
+          value: /dev/dri/renderD200
+        # The HDR/HEVC Main10 chain (wolf v0.2.0) stays dormant unless this
+        # env is the exact string "TRUE" (configTOML.cpp string compare);
+        # quoted so YAML does not coerce unquoted TRUE to boolean true ->
+        # "true". Not enabled on ai-00: 8-bit SDR encode is the target.
+        - name: WOLF_ENABLE_HDR
+          value: "FALSE"
+      volumeMounts:
+        - name: wolf-root-entrypoint
+          mountPath: /entrypoint.sh
+          subPath: entrypoint.sh
+      # Privileged so wolf's uinput hotplug devices are admitted into the
+      # pod-private /dev/input (operator v0.1.3+ scope); the app container
+      # is privileged for the same class of reason, so this widens nothing
+      # new. On ai-00 it also exposes the host's /dev/dri, keeping
+      # WOLF_RENDER_NODE present even if the allocation ever changes.
+      securityContext:
+        privileged: true
+      resources:
+        requests:
+          squat.ai/r9700-a: "1"
+          squat.ai/uinput: "1"
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          squat.ai/r9700-a: "1"
+          squat.ai/uinput: "1"
+          memory: 2Gi
+    wolfAgent:
+      volumeMounts:
+        - name: udev-data
+          mountPath: /run/udev
+      securityContext:
+        # Broadcasting synthetic libudev netlink events (fake-udev) requires
+        # CAP_NET_ADMIN in the pod's network namespace.
+        capabilities:
+          add:
+            - NET_ADMIN
