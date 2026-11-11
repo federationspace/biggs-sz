@@ -24,8 +24,13 @@ spec:
       image: ghcr.io/cloudnative-pg/postgresql:17.10-202606050113-minimal-trixie@sha256:79b87b797c7e121b8752b80f2a59011cdbcf54b72945c58dfdc40634c4f347a9
     - major: 17
       image: ghcr.io/cloudnative-pg/postgresql:17.10-202606050113-minimal-trixie@sha256:79b87b797c7e121b8752b80f2a59011cdbcf54b72945c58dfdc40634c4f347a9
+    # major 18 uses the STANDARD operand instead of minimal: silo's migrations
+    # require the pgvector extension files, and the extension images above only
+    # attach via k8s ImageVolumes (alpha on this cluster's k3s 1.34, gate off),
+    # so the extension must be baked into the operand image (CNPG guidance for
+    # unsupported kubelets). standard-trixie bundles pgvector 0.8.2.
     - major: 18
-      image: ghcr.io/cloudnative-pg/postgresql:18.4-202606050102-minimal-trixie@sha256:db5bf5941ead5b3e3ab8d3ba992e14c1607eb96da298bc5807ffee3d82347ce6
+      image: ghcr.io/cloudnative-pg/postgresql:18.4-202606050102-standard-trixie@sha256:853438f8efd08a9aa39160d49123d3293ba6988be521c57f370b6155d6c70cac
       extensions:
         - name: pg-crash
           image:
