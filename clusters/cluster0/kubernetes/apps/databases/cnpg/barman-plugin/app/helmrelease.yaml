@@ -1,0 +1,20 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: plugin-barman-cloud
+  namespace: cnpg-system
+spec:
+  interval: 3m
+  chart:
+    spec:
+      chart: plugin-barman-cloud
+      # Pinned 0.9.0 (app v0.16.0). 0.9.0 is the first release shipping
+      # barman 3.16.2, which fixed retention deletes (DeleteObjects
+      # Content-MD5) on non-AWS S3 stores, and adds s3AddressingStyle for
+      # S3-compatible stores. Nothing references the plugin yet, so this
+      # release is inert until the first cluster gets a plugins: stanza.
+      version: 0.9.0
+      sourceRef:
+        kind: HelmRepository
+        name: cloudnative-pg
+        namespace: flux-system
