@@ -1,33 +1,11 @@
 ---
-# silo.gregbob.net: Silo (self-hosted media server) behind Pocket ID SSO.
-# Two stages, same as listenarr: the ext-authz policy (silo-auth) exists
-# before the route so the hostname is never open to the internet
-# (*.gregbob.net is a public wildcard); the app stage also waits for
-# oauth2-proxy to serve.
-# extAuth fails closed: a missing or endpoint-less oauth2-proxy answers 403.
-apiVersion: kustomize.toolkit.fluxcd.io/v1
-kind: Kustomization
-metadata:
-  name: &app silo-auth
-  namespace: flux-system
-spec:
-  dependsOn:
-    # The AgentgatewayPolicy CRD.
-    - name: agentgateway
-  targetNamespace: media
-  commonMetadata:
-    labels:
-      app.kubernetes.io/name: *app
-  path: ./clusters/cluster0/kubernetes/apps/media/silo/auth
-  prune: true
-  sourceRef:
-    kind: GitRepository
-    name: flux-system
-  wait: true
-  interval: 3m
-  retryInterval: 1m
-  timeout: 2m
----
+# silo.gregbob.net: Silo (self-hosted media server).
+# No gateway-level SSO here (listenarr keeps its own): Silo does its own
+# authentication with local accounts, and its native phone/TV apps cannot
+# pass a cookie-based ext-auth gate. They probe unauthenticated API
+# endpoints before signing in, and the gateway 302 to the IdP broke that
+# with "Enter a valid server address". Silo's own sign-in and session
+# auth are the access boundary; the route is HTTPS-only.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -35,9 +13,6 @@ metadata:
   namespace: flux-system
 spec:
   dependsOn:
-    - name: silo-auth
-    # The sign-in service the policy calls.
-    - name: oauth2-proxy
     # The shared media library volume.
     - name: media-storage
     # The silo database (cnpg-silo cluster + silo Database).
