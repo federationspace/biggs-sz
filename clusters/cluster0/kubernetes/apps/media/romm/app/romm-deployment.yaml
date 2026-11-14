@@ -65,6 +65,24 @@ spec:
               value: "2"
             - name: WEB_SERVER_CONCURRENCY
               value: "3"
+            - name: OIDC_ENABLED
+              value: "true"
+            - name: OIDC_PROVIDER
+              value: "pocketid"
+            - name: OIDC_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: romm-oidc
+                  key: client-id
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: romm-oidc
+                  key: client-secret
+            - name: OIDC_REDIRECT_URI
+              value: "https://romm.gregbob.net/api/oauth/openid"
+            - name: OIDC_SERVER_APPLICATION_URL
+              value: "https://id.gregbob.net"
           envFrom:
             - secretRef:
                 name: romm-secrets
