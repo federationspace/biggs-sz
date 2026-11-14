@@ -134,6 +134,17 @@ kubernetes/apps/<ns>/<app>/
   `hermes.gregbob.net` behind Pocket ID OIDC. Image: the `catalog-harness2`
   build of shrinedogg/hermes-agent with the harness2 plugin vendored (same
   image as `hermes.biggs.dog`).
+  - **Matrix E2EE caveat**: the E2EE key store is
+    `/opt/data/platforms/matrix/store/` on the `hermes-data` PVC
+    (`crypto.db` plus sync state). The account's identity and every Megolm
+    session live there, so deleting or re-creating the PVC gives the bot a
+    fresh E2EE identity on the same device: clients see a key change and
+    must re-verify, and encrypted history from before the wipe is
+    undecryptable by the bot. `MATRIX_E2EE_MODE` is not a manifest value;
+    it travels in the `hermes-gateway` 1Password item via envFrom. If it is
+    missing, the adapter defaults to E2EE off and drops every encrypted
+    message, with only a log line to show for it. Any future data migration
+    must carry `platforms/matrix/store/` in the copied subset.
 - **Auth**: `auth/pocket-id` is the OIDC provider (`id.gregbob.net`,
   passkey-only), backed by `cnpg-pocket-id`. Only infrastructure settings
   (URL, DB, encryption key) are in the manifests; Application Configuration

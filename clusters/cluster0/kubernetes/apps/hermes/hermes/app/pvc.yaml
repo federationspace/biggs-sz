@@ -2,6 +2,12 @@
 # 30Gi for the ~250MiB migrated durable subset + headroom (logs, uploads,
 # future state). Block device (rook RBD) => SQLite WAL-safe.
 # Exact port of biggs.dog's pvc.yaml (30Gi, prune-disabled).
+#
+# The Matrix E2EE key store (/opt/data/platforms/matrix/store/) lives on
+# this volume. Deleting it gives the bot a fresh E2EE identity: clients
+# must re-verify the device key, and pre-wipe encrypted history is
+# undecryptable by the bot. Carry the store in any future data migration;
+# see AGENTS.md (Hermes, Matrix E2EE caveat).
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
