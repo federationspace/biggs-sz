@@ -25,3 +25,11 @@ spec:
   storage:
     size: 5Gi
     storageClass: local-path
+  # Barman Cloud plugin: WAL archiving to the offsite ObjectStore (B2).
+  # Closes the #261 Q3 gap that left cnpg-homarr the only cluster without
+  # offsite backups.
+  plugins:
+  - name: barman-cloud.cloudnative-pg.io
+    isWALArchiver: true
+    parameters:
+      barmanObjectName: offsite
