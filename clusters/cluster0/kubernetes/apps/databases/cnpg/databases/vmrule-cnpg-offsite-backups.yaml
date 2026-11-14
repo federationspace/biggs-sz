@@ -21,9 +21,8 @@
 #
 # WAL archiving is observed through PostgreSQL's own pg_stat_archiver
 # (exposed as cnpg_pg_stat_archiver_*). It tracks the archiver CNPG
-# invokes on every WAL switch: the barman sidecar on enrolled clusters,
-# the local archive directory on unenrolled ones (cnpg-homarr, pending
-# #261 Q3), so a stuck archiver is caught either way.
+# invokes on every WAL switch: the barman sidecar, which is now the
+# archiver on every cluster, so a stuck archiver is caught.
 #
 # Every rule evaluates the primary only (cnpg_role="primary", set by the
 # VMPodScrape relabel from the pod's `role` label), so each cluster
@@ -39,7 +38,7 @@ spec:
     - name: cnpg.rules.offsite-backups
       rules:
         - alert: CNPGBackupStale
-          # Daily base backups run 03:00-03:50 UTC. 26h after the last
+          # Daily base backups run 03:00-04:10 UTC. 26h after the last
           # success (~2h after a missed run) is the detection point.
           # A freshly enrolled cluster with no backup yet reports 0 and
           # fires until its first backup completes: intended.
@@ -53,7 +52,7 @@ spec:
             description: >-
               The last successful Barman Cloud base backup of
               {{ $labels.cnpg_cluster }} is {{ $value | humanizeDuration }} old.
-              Daily backups run 03:00-03:50 UTC, so a missed run means today's
+              Daily backups run 03:00-04:10 UTC, so a missed run means today's
               restore point may be missing. Check the barman sidecar logs on
               {{ $labels.pod }} and the bucket path
               s3://biggs-sz-cnpg/{{ $labels.cnpg_cluster }}/.
