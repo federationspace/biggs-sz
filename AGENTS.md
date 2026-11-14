@@ -135,7 +135,7 @@ kubernetes/apps/<ns>/<app>/
   build of shrinedogg/hermes-agent with the harness2 plugin vendored (same
   image as `hermes.biggs.dog`).
   - **kubectl in the pod**: the `install-kubectl` init container copies
-    kubectl v1.36.4 (same k8s minor as cluster0) into
+    kubectl v1.34.2 (cluster0 runs v1.34.3; no 1.34.3 tag upstream) into
     `/opt/data/.local/bin` on the PVC (already on the gateway PATH), and
     the pod's ServiceAccount `hermes` carries read + debug RBAC only
     (`app/rbac.yaml`: get/list/watch on everything incl. secrets, plus
