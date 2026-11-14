@@ -218,6 +218,10 @@ spec:
             # scripts test -n, so "false" still enables gamescope).
             - name: RUN_SWAY
               value: "true"
+            # Local time zone (repo-wide value; see the /etc/localtime
+            # link in the command below). The node and image default to UTC.
+            - name: TZ
+              value: "America/Detroit"
             - name: PROTON_LOG
               value: "1"
             # The steam image (Ubuntu-based) ships the same GNOME glycin
@@ -561,6 +565,16 @@ spec:
                   while [ ! -S /tmp/.X11-unix/sway.socket ]; do sleep 2; done
                   exec runuser -u ${UNAME:-retro} -- python3 /tmp/fs-watcher.py
                 ) &
+              fi
+
+              # Local time for the Steam/BPM clock: the image links
+              # /etc/localtime to Etc/UTC. TZ (env above) covers processes
+              # that read it; also point /etc/localtime at TZ for those that
+              # read the file instead (Steam's pressure-vessel runtime
+              # shares this container's /etc/localtime). Still root here.
+              if [ -n "$TZ" ] && [ -f "/usr/share/zoneinfo/$TZ" ]; then
+                ln -sf "/usr/share/zoneinfo/$TZ" /etc/localtime
+                echo "$TZ" > /etc/timezone
               fi
 
               chown -R $PUID:$PGID /home/retro
