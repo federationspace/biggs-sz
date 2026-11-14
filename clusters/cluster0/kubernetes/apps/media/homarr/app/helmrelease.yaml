@@ -32,6 +32,24 @@ spec:
     env:
       # -- Your local time zone
       TZ: "America/Detroit"
+      # -- Login: Pocket ID (id.gregbob.net) is the only provider.
+      # AUTO_LOGIN skips the login page and goes straight to the IdP.
+      # CREDENTIALS_LINKING maps the first Pocket ID sign-in (szkud, verified
+      # email) onto the existing credentials user, preserving boards, groups
+      # and password login.
+      AUTH_PROVIDERS: "oidc"
+      # -- Issuer without trailing slash (Pocket ID APP_URL).
+      AUTH_OIDC_ISSUER: "https://id.gregbob.net"
+      # -- Display name on the login screen.
+      AUTH_OIDC_CLIENT_NAME: "Pocket ID"
+      # -- Skip the login page, redirect straight to the IdP.
+      AUTH_OIDC_AUTO_LOGIN: "true"
+      # -- Link Pocket ID sign-ins to the existing credentials user with the
+      # same verified email (keeps boards and admin group).
+      AUTH_OIDC_ENABLE_DANGEROUS_CREDENTIALS_LINKING: "true"
+      # -- Canonical public origin. TLS ends at the gateway, so without this
+      # Homarr sees http and fails OIDC origin checks and secure cookies.
+      BASE_URL: "https://homarr.gregbob.net"
 
     database:
       # -- Database type: sqlite, mysql or postgresql
@@ -54,6 +72,14 @@ spec:
         # dbUrlKey: ""
       dbEncryption:
         existingSecret: "homarr-db-encryption"
+      # Pocket ID OIDC client. The secret comes from the homarr-oidc
+      # ExternalSecret (1Password item homarr-oidc); the chart renders
+      # AUTH_OIDC_CLIENT_ID / AUTH_OIDC_CLIENT_SECRET from these keys when
+      # AUTH_PROVIDERS contains oidc.
+      authOidcCredentials:
+        existingSecret: "homarr-oidc"
+        oidcClientId: "client-id"
+        oidcClientSecret: "client-secret"
     # Service configuration
     service:
       # -- Enable service
