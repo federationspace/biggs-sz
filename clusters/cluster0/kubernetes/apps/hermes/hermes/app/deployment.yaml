@@ -1,32 +1,7 @@
----
-# Minimal dedicated identity. No cluster RBAC: Hermes talks to Matrix, the
-# Nous Portal API, and its own PVC -- it never touches the Kubernetes API.
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: hermes
-  namespace: hermes
-  labels:
-    app.kubernetes.io/name: hermes
----
-# Single source of truth for all Hermes state (config, .env-derived secrets on
-# disk, memories, sessions, skills, cron, logs). ceph-block RWO: replicated,
-# node-independent, and single-writer -- which also structurally prevents the
-# "never run two gateways on one data dir" footgun the docs warn about.
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: hermes-data
-  namespace: hermes
-  labels:
-    app.kubernetes.io/name: hermes
-spec:
-  storageClassName: ceph-block
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10Gi
+# Hermes gateway (biggs.dog pattern, ported 2026-11-14). The image's
+# entrypoint-dispatch.sh runs the s6 supervision tree that supervises
+# `gateway run` + the dashboard (HERMES_DASHBOARD=1) -- NO command override;
+# overriding it breaks s6. HERMES_HOME=/opt/data is baked into the image.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -35,11 +10,9 @@ metadata:
   namespace: hermes
   labels:
     app.kubernetes.io/name: hermes
-    app.kubernetes.io/version: "v2026.8.18"
 spec:
   replicas: 1
-  # Recreate + RWO PVC: only one gateway process may own /opt/data at a time
-  # (session/memory stores are not safe for concurrent writers).
+  # RWO PVC: never let two pods attach during a rollout.
   strategy:
     type: Recreate
   selector:
@@ -49,20 +22,14 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: hermes
-        app.kubernetes.io/version: "v2026.8.18"
-      annotations:
-        # The seed-config init container copies hermes-config into /opt/data
-        # only at pod start, so a ConfigMap edit alone never reaches the
-        # running gateway. Bump this value in the same commit as any
-        # configmap.yaml change to roll the pod and re-seed the config.
-        hermes.gregbob.net/config-revision: "3"
     spec:
-      serviceAccountName: hermes
-      terminationGracePeriodSeconds: 30
-      # CPU-only workload (inference is external via Nous Portal). Do NOT pin
+      hostUsers: false
+      automountServiceAccountToken: false
+      # CPU-only workload (inference is external). Do NOT pin
       # nvidia.com/gpu.present -- that made other pods unschedulable.
       # Softly prefer non-GPU nodes so Hermes never competes with vLLM/gaming
-      # for the GPU node's resources.
+      # for the GPU node's resources (cluster0 rule; biggs.dog has no
+      # affinity, its cluster layout differs).
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -78,170 +45,101 @@ spec:
                   - key: nvidia.com/gpu.present
                     operator: NotIn
                     values: ["true"]
-      # s6-overlay's /init (PID 1) starts as root to chown the volume on first
-      # boot, then drops every supervised service to the hermes user (UID
-      # 10000). So this pod canNOT use the strict runAsNonRoot securityContext
-      # the MCP siblings use. fsGroup pre-owns the ceph volume for UID 10000 so
-      # the runtime user can write it without a root chown pass every boot.
-      securityContext:
-        fsGroup: 10000
-      initContainers:
-        # Seed the Git-managed base config AND the Nous credential into
-        # /opt/data before the gateway starts. Overwrites config.yaml/SOUL.md/
-        # auth.json every boot (Git + 1Password win); leaves all agent-managed
-        # state (memories/, sessions/, skills/, cron/) untouched.
-        - name: seed-config
-          image: docker.io/library/busybox:1.38
-          imagePullPolicy: IfNotPresent
-          command: ["/bin/sh", "-ec"]
-          args:
-            - |
-              set -eu
-              cp /seed/config.yaml /data/config.yaml
-              cp /seed/SOUL.md /data/SOUL.md
-
-              # Build auth.json with the Nous API key in Hermes's credential
-              # pool format. This is how `hermes auth add nous --type api-key`
-              # stores it: the key goes into access_token, base_url points at
-              # the Portal inference endpoint.
-              NOUS_KEY=$(cat /secrets/NOUS_API_KEY)
-              cat > /data/auth.json <<AUTHJSON
-              {
-                "version": 1,
-                "providers": {},
-                "credential_pool": {
-                  "nous": [{
-                    "id": "k8s-seed",
-                    "label": "1password-seed",
-                    "auth_type": "api_key",
-                    "priority": 0,
-                    "source": "manual",
-                    "access_token": "${NOUS_KEY}",
-                    "base_url": "https://inference-api.nousresearch.com/v1",
-                    "last_status": null,
-                    "last_status_at": null,
-                    "last_error_code": null,
-                    "last_error_reason": null,
-                    "last_error_message": null,
-                    "last_error_reset_at": null,
-                    "request_count": 0
-                  }]
-                }
-              }
-              AUTHJSON
-
-              echo "seeded config.yaml + SOUL.md + auth.json into /opt/data"
-          volumeMounts:
-            - name: seed
-              mountPath: /seed
-              readOnly: true
-            - name: data
-              mountPath: /data
-            - name: secrets
-              mountPath: /secrets
-              readOnly: true
-          resources:
-            requests:
-              cpu: 10m
-              memory: 16Mi
-            limits:
-              memory: 64Mi
       containers:
-        - name: hermes
-          image: docker.io/nousresearch/hermes-agent:v2026.9.24
-          imagePullPolicy: IfNotPresent
-          args: ["gateway", "run"]
+        - name: gateway
+          # Custom build from github.com/shrinedogg/hermes-agent branch
+          # build/dockerhub-catalog-harness2 @ 4aa78e93 (catalog-harness2
+          # tree = upstream main 2026-11-12 sync, e0d4c3a3):
+          # 0.23.0-generation core (release base v2026.9.24) + the harness2
+          # plugin catalog entry (plugin-catalog/harness2.yaml) + harness2
+          # vendored (plugins-vendor/harness2 @ shrinedogg/harness2-hermes
+          # 51acf02, the catalog pin) which the image seeds into
+          # $HERMES_HOME/plugins on first boot (never overwriting an
+          # existing install).
+          # Built by GH run 43280215151 on the self-hosted cluster0-hermes
+          # runner (2026-11-12, success); digest pinned from the Docker Hub
+          # tag manifest (oci image index, amd64). Identical image to
+          # hermes.biggs.dog (biggs.dog cluster1).
+          image: docker.io/shrinedogg/hermes-agent:catalog-harness2-4aa78e9@sha256:6c1549f62fd65e036099c88c85a121c344fac938cb10fb4207bd53616a68ff60
           env:
-            # Enable the supervised web dashboard (published at
-            # hermes.gregbob.net via httproute.yaml). Its basic-auth gate is
-            # satisfied by HERMES_DASHBOARD_BASIC_AUTH_* from hermes-secrets.
+            # Dashboard on, bound 0.0.0.0 by image default; public URL pinned
+            # so the OIDC redirect URI = https://hermes.gregbob.net/auth/callback.
             - name: HERMES_DASHBOARD
               value: "1"
-            # Matrix homeserver (non-secret): the cluster's own continuwuity
-            # client-server API, reached directly in-cluster (bypasses the
-            # Cloudflare tunnel). server_name is gregbob.net. The Matrix token
-            # + allow-list arrive as secret env from hermes-secrets (envFrom).
-            - name: MATRIX_HOMESERVER
-              value: http://continuwuity-service.matrix.svc.cluster.local:8080
-            # Require an @mention before responding in rooms (default true;
-            # set explicitly). DMs always respond.
-            - name: MATRIX_REQUIRE_MENTION
-              value: "true"
-            # Home room (non-secret): where the agent delivers proactive
-            # messages, cron/routine output, and notifications. A room ID is
-            # not a credential, so it is declared here rather than in
-            # hermes-secrets. Declaring it in Git also makes it reproducible;
-            # note that this env var takes precedence over a runtime
-            # /sethome, so change the room here rather than in chat.
-            - name: MATRIX_HOME_ROOM
-              value: "!3xVhsLiQSiUFlsHBADJUcMKtP7R_3HfaW659rCAHEDc"
-            # E2EE (non-secret mode switch; the recovery key itself is
-            # secret and comes from hermes-secrets via envFrom below).
-            # "optional" tries E2EE where libolm/mautrix[encryption] are
-            # available (both are present in this image) but keeps
-            # unencrypted rooms/DMs working if crypto setup ever fails,
-            # rather than failing closed like "required" would. Without
-            # this, messages sent in encrypted rooms arrive as
-            # m.room.encrypted ciphertext the bot has no keys to open --
-            # it silently can't read them, which looked like the bot
-            # ignoring @mentions entirely.
-            - name: MATRIX_E2EE_MODE
-              value: "optional"
-          # Provider key, Matrix token/allow-list, and dashboard basic-auth
-          # creds -- all from the hermes-secrets ExternalSecret, injected as
-          # env vars. NOUS_API_KEY is read by the named custom provider's
-          # `key_env` in config.yaml (no auth.json seeding). MATRIX_* and
-          # HERMES_DASHBOARD_BASIC_AUTH_* are consumed directly by Hermes.
+            - name: HERMES_DASHBOARD_PUBLIC_URL
+              value: "https://hermes.gregbob.net"
+            # PocketID at id.gregbob.net (cluster0 equivalent of biggs.dog's
+            # id.biggs.dog). Confidential client: id + secret come from the
+            # hermes-gateway secret (envFrom); the self-hosted OIDC provider
+            # layers the secret on top of PKCE.
+            - name: HERMES_DASHBOARD_OIDC_ISSUER
+              value: "https://id.gregbob.net"
+            # biggs.dog deltas dropped here: OBSIDIAN_VAULT_PATH (no vault
+            # clone -- the vault is a local Mac directory, not a git repo)
+            # and no vault-clone init container. Matrix credentials come from
+            # the hermes-gateway secret (envFrom), 1:1 with the migrated
+            # laptop .env key names.
           envFrom:
             - secretRef:
-                name: hermes-secrets
+                name: hermes-gateway
           ports:
-            - name: api
-              containerPort: 8642
-              protocol: TCP
-            - name: dashboard
+            - name: http-dashboard
               containerPort: 9119
               protocol: TCP
-          # Dashboard HTTP port is always bound when HERMES_DASHBOARD=1, so it
-          # is a reliable liveness/readiness signal without needing the API
-          # server (8642) enabled.
+          # tcpSocket probes: every /api/ route is session-token gated, so an
+          # HTTP probe would fight the auth gate; s6 restarts the gateway if
+          # the process dies, liveness only catches a wedged listener.
           readinessProbe:
             tcpSocket:
-              port: dashboard
+              port: http-dashboard
             initialDelaySeconds: 20
-            periodSeconds: 15
-            timeoutSeconds: 5
+            periodSeconds: 10
           livenessProbe:
             tcpSocket:
-              port: dashboard
+              port: http-dashboard
             initialDelaySeconds: 60
             periodSeconds: 30
-            timeoutSeconds: 5
+            failureThreshold: 5
           resources:
             requests:
-              cpu: 250m
+              cpu: 500m
               memory: 1Gi
-            # Browser automation (Playwright/Chromium) is the memory-hungry
-            # path; the docs recommend >=2Gi when browser tools are active.
             limits:
+              cpu: "2"
               memory: 4Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["SETUID", "SETGID", "CHOWN", "DAC_OVERRIDE"]
+            seccompProfile:
+              type: RuntimeDefault
+          # NOTE: image boots as root and drops privileges in the entrypoint
+          # (s6 + setuid), so runAsNonRoot is NOT set (would break boot).
+          # Boot contract for the pinned image (hermes-agent v2026.9.24 base;
+          # all caps PSA-baseline-legal, verified vs k8s v1.36.0 -- same
+          # contract as hermes.biggs.dog, accepted 2026-11-07 there):
+          #   SETUID/SETGID - s6 entrypoint drops root -> hermes (setuidgid)
+          #   CHOWN         - stage2 hands /opt/data (PVC) to hermes and the
+          #                   supervise-perms hook grants hermes access to the
+          #                   supervise/ trees s6 creates root-owned under /run
+          #   DAC_OVERRIDE  - root s6-supervise/s6-svlisten operate the
+          #                   hermes-owned trees and PVC state
+          # Tradeoff: container root can bypass file perms on mounted volumes
+          # (can read hermes-owned 0600 runtime state). Accepted 2026-11-14
+          # for this single-user cluster, same as hermes.biggs.dog.
           volumeMounts:
             - name: data
               mountPath: /opt/data
-            # Playwright needs shared memory; k8s analog of --shm-size=1g.
-            - name: dshm
-              mountPath: /dev/shm
+            - name: tmp
+              mountPath: /tmp
+            - name: run
+              mountPath: /run
       volumes:
-        - name: seed
-          configMap:
-            name: hermes-config
-        - name: secrets
-          secret:
-            secretName: hermes-secrets
         - name: data
           persistentVolumeClaim:
             claimName: hermes-data
-        - name: dshm
-          emptyDir:
-            medium: Memory
-            sizeLimit: 1Gi
+        - name: tmp
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
