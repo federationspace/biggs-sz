@@ -1,0 +1,27 @@
+# Materializes Secret "romm-oidc", read by the RomM Deployment for native
+# OIDC login (OIDC_CLIENT_ID / OIDC_CLIENT_SECRET).
+#
+# 1Password item (vault biggs-sz): romm-oidc
+#   client-id      Client ID of the Pocket ID OIDC client "RomM"
+#                  (callback https://romm.gregbob.net/api/oauth/openid).
+#   client-secret  That client's secret.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: romm-oidc
+  namespace: media
+spec:
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: onepassword-connect
+  target:
+    creationPolicy: Owner
+  data:
+  - secretKey: client-id
+    remoteRef:
+      key: "romm-oidc"
+      property: client-id
+  - secretKey: client-secret
+    remoteRef:
+      key: "romm-oidc"
+      property: client-secret

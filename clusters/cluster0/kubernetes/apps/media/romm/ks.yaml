@@ -1,43 +1,10 @@
 ---
-# romm.gregbob.net: RomM (comic management) behind Pocket ID SSO.
-# Two stages: romm-auth ships the ext-authz policy first. The route already
-# exists and is public, so it becomes gated as soon as romm-auth reconciles;
-# the app stage also waits for oauth2-proxy to serve.
-# extAuth fails closed: a missing or endpoint-less oauth2-proxy answers 403.
-apiVersion: kustomize.toolkit.fluxcd.io/v1
-kind: Kustomization
-metadata:
-  name: &app romm-auth
-  namespace: flux-system
-spec:
-  dependsOn:
-    # The AgentgatewayPolicy CRD.
-    - name: agentgateway
-  targetNamespace: media
-  commonMetadata:
-    labels:
-      app.kubernetes.io/name: *app
-  path: ./clusters/cluster0/kubernetes/apps/media/romm/auth
-  prune: true
-  sourceRef:
-    kind: GitRepository
-    name: flux-system
-  wait: true
-  interval: 3m
-  retryInterval: 1m
-  timeout: 2m
----
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
   name: &app romm
   namespace: flux-system
 spec:
-  dependsOn:
-    - name: romm-auth
-    # The sign-in service the policy calls.
-    - name: oauth2-proxy
-    - name: cnpg-databases
   targetNamespace: media
   commonMetadata:
     labels:
@@ -51,3 +18,5 @@ spec:
   interval: 3m
   retryInterval: 1m
   timeout: 2m
+  dependsOn:
+    - name: cnpg-databases
