@@ -111,7 +111,7 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-              add: ["SETUID", "SETGID", "CHOWN", "DAC_OVERRIDE"]
+              add: ["SETUID", "SETGID", "CHOWN", "DAC_OVERRIDE", "FOWNER"]
             seccompProfile:
               type: RuntimeDefault
           # NOTE: image boots as root and drops privileges in the entrypoint
@@ -123,6 +123,11 @@ spec:
           #   CHOWN         - stage2 hands /opt/data (PVC) to hermes and the
           #                   supervise-perms hook grants hermes access to the
           #                   supervise/ trees s6 creates root-owned under /run
+          #   FOWNER        - 02-reconcile-profiles chowns /run/hermes-service
+          #                   to hermes and then chmods it 0755; without
+          #                   FOWNER, root cannot chmod an inode it no longer
+          #                   owns (EPERM), the boot script aborts, and the
+          #                   profile gateway service is never registered
           #   DAC_OVERRIDE  - root s6-supervise/s6-svlisten operate the
           #                   hermes-owned trees and PVC state
           # Tradeoff: container root can bypass file perms on mounted volumes
