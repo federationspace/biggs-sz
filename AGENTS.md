@@ -129,8 +129,11 @@ kubernetes/apps/<ns>/<app>/
   driver, requests `gpu.intel.com/i915`) for hardware transcoding;
   `silo` pins to `worker-00` (Intel iGPU, `i915` driver, requests
   `gpu.intel.com/i915`) and `continuwuity` pins to `worker-01`.
-- **Hermes**: `hermes/hermes` is the Matrix bot (dashboard at
-  `hermes.gregbob.net`).
+- **Hermes**: `hermes/hermes` is the personal Hermes agent (migrated
+  laptop HERMES_HOME on the `hermes-data` PVC), Matrix-enabled, dashboard at
+  `hermes.gregbob.net` behind Pocket ID OIDC. Image: the `catalog-harness2`
+  build of shrinedogg/hermes-agent with the harness2 plugin vendored (same
+  image as `hermes.biggs.dog`).
 - **Auth**: `auth/pocket-id` is the OIDC provider (`id.gregbob.net`,
   passkey-only), backed by `cnpg-pocket-id`. Only infrastructure settings
   (URL, DB, encryption key) are in the manifests; Application Configuration

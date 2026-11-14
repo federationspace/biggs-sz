@@ -9,19 +9,20 @@
 #     here. It stays in-cluster only; publishing it would require
 #     API_SERVER_ENABLED + a key and is a real attack surface.
 #   * The dashboard's OWN auth gate is the protection. On a non-loopback bind
-#     (the container default) with a DashboardAuthProvider registered, Hermes
-#     FAILS CLOSED and redirects every request to a login page. The basic-auth
-#     provider is activated by HERMES_DASHBOARD_BASIC_AUTH_USERNAME/_PASSWORD/
-#     _SECRET, injected from the hermes-secrets ExternalSecret. If those are
-#     unset the dashboard refuses to start on a public bind -- there is no
-#     unauthenticated escape hatch (HERMES_DASHBOARD_INSECURE is a no-op).
+#     (the container default) with an auth provider registered, Hermes FAILS
+#     CLOSED and redirects every unauthenticated request to the sign-in page.
+#     The registered provider is Pocket ID OIDC: HERMES_DASHBOARD_OIDC_ISSUER
+#     (https://id.gregbob.net) from the Deployment, client id/secret from the
+#     hermes-gateway secret (envFrom), so the browser/desktop client completes
+#     a native PKCE sign-in against id.gregbob.net (confidential client
+#     hermes-dashboard, redirect URI https://hermes.gregbob.net/auth/callback).
 #
 # NOTE ON GATEWAY-LEVEL AUTH (why there is no AgentgatewayPolicy here, unlike
 # the vllm route): vllm's route guards an API surface whose clients send
 # `Authorization: Bearer`, so a Strict apiKeyAuthentication policy fits. The
 # dashboard is browser-facing -- browsers cannot send a bearer header, so a
 # Strict bearer policy would reject the login page itself and make the
-# dashboard unreachable. The app-level basic-auth login gate above is the
+# dashboard unreachable. The app-level OIDC login gate above is the
 # correct protection for a human-facing surface. If you later want an
 # additional gateway-edge factor, use an AgentgatewayPolicy mode that
 # understands browser auth (e.g. basic/OIDC), not Strict bearer.

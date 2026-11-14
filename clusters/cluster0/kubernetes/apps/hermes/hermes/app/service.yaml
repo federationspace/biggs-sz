@@ -19,7 +19,10 @@ spec:
       targetPort: api
       protocol: TCP
     # Web dashboard -- backend for httproute.yaml (hermes.gregbob.net).
+    # targetPort matches the deployment's http-dashboard container port
+    # (biggs.dog pattern; the old `dashboard` port name was dropped in the
+    # catalog-harness2 port).
     - name: dashboard
       port: 9119
-      targetPort: dashboard
+      targetPort: http-dashboard
       protocol: TCP
