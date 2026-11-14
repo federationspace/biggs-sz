@@ -47,6 +47,11 @@ spec:
       # -- Link Pocket ID sign-ins to the existing credentials user with the
       # same verified email (keeps boards and admin group).
       AUTH_OIDC_ENABLE_DANGEROUS_CREDENTIALS_LINKING: "true"
+      # -- Manage OIDC group memberships locally instead of syncing them from
+      # the Pocket ID groups claim (which is empty for this client). Without
+      # this, every Pocket ID login reconciles the user's groups against the
+      # claim and strips locally added memberships such as credentials-admin.
+      AUTH_OIDC_GROUPS_LOCAL_MANAGEMENT: "true"
       # -- Canonical public origin. TLS ends at the gateway, so without this
       # Homarr sees http and fails OIDC origin checks and secure cookies.
       BASE_URL: "https://homarr.gregbob.net"
