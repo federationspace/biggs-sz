@@ -24,7 +24,13 @@ spec:
         app.kubernetes.io/name: hermes
     spec:
       hostUsers: false
-      automountServiceAccountToken: false
+      # In-cluster kubectl auth for the agent pod: with this on, k8s
+      # mounts the projected SA token (kube-api-access volume) and the
+      # kubectl binary (installed by the install-kubectl init
+      # container below) uses it with no kubeconfig. Scope: read +
+      # debug only, see app/rbac.yaml.
+      automountServiceAccountToken: true
+      serviceAccountName: hermes
       # CPU-only workload (inference is external). Do NOT pin
       # nvidia.com/gpu.present -- that made other pods unschedulable.
       # Softly prefer non-GPU nodes so Hermes never competes with vLLM/gaming
@@ -45,6 +51,35 @@ spec:
                   - key: nvidia.com/gpu.present
                     operator: NotIn
                     values: ["true"]
+      initContainers:
+        # 1) kubectl: copy the pinned kubectl v1.36.4 binary (same k8s
+        #    minor as cluster0) into /opt/data/.local/bin on the data
+        #    PVC. That directory is already on the gateway's PATH, so
+        #    no PATH env change is needed. Self-healing: re-copied on
+        #    every pod start, so a PVC wipe cannot permanently lose
+        #    the tool. Same init-writes-to-PVC pattern as biggs.dog's
+        #    vault-clone (root boot, DAC_OVERRIDE, seconds-lived).
+        - name: install-kubectl
+          # third-party image, pinned by tag-manifest digest (same
+          # convention as the gateway image below).
+          image: docker.io/alpine/kubectl:1.36.4@sha256:a2cd8ee034cbe04d651e565b3373299b31921de5c2af86490559e21b3e197808
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              mkdir -p /opt/data/.local/bin
+              install -m 0755 -o root -g root /usr/local/bin/kubectl /opt/data/.local/bin/kubectl
+          volumeMounts:
+            - name: data
+              mountPath: /opt/data
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["DAC_OVERRIDE"]
+            seccompProfile:
+              type: RuntimeDefault
       containers:
         - name: gateway
           # Custom build from github.com/shrinedogg/hermes-agent branch
