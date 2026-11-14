@@ -110,6 +110,13 @@ spec:
             # layers the secret on top of PKCE.
             - name: HERMES_DASHBOARD_OIDC_ISSUER
               value: "https://id.gregbob.net"
+            # Matrix E2EE policy (a string, not a secret -- so plain env, not the
+            # hermes-gateway item). "optional" tries E2EE where the deps are
+            # available but keeps plaintext rooms working if crypto init fails;
+            # "off" drops every encrypted message. Key store lives on the PVC,
+            # see AGENTS.md (Matrix E2EE caveat).
+            - name: MATRIX_E2EE_MODE
+              value: "optional"
             # biggs.dog deltas dropped here: OBSIDIAN_VAULT_PATH (no vault
             # clone -- the vault is a local Mac directory, not a git repo)
             # and no vault-clone init container. Matrix credentials come from
