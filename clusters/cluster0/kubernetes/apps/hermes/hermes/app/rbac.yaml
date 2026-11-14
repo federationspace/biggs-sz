@@ -1,0 +1,56 @@
+---
+# kubectl access for the hermes agent pod. The gateway container runs
+# as the hermes user with no cluster credentials of its own; this
+# ServiceAccount plus ClusterRole pair gives it cluster-wide read plus
+# the debug subresources (pods/log, pods/exec, pods/port-forward).
+# Scope decided 2026-11-14: read + debug, NO write verbs. Every
+# persistent change still goes through a GitOps PR in this repo; the
+# in-pod kubectl is for inspection and debugging (including the repo's
+# own runbook flows, e.g. the pocket-id one-time-access-token exec).
+#
+# PSA note: the hermes namespace enforces baseline, which already
+# accepts this pod's root-booting s6 layout (see namespace.yaml), and
+# says nothing about ServiceAccounts, so nothing changes there.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hermes
+  namespace: hermes
+  labels:
+    app.kubernetes.io/name: hermes
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hermes-ops
+  labels:
+    app.kubernetes.io/name: hermes
+rules:
+  # Read everything, cluster-wide: pods, workloads, Flux Kustomizations
+  # and HelmReleases, CR statuses, secret inspection (single-user
+  # homelab; the agent is the user's ops assistant, and several
+  # diagnoses need secret data, e.g. ExternalSecret sync state).
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  # Debug subresources: kubectl logs = GET pods/log; kubectl exec and
+  # port-forward = CREATE. The read rule above does not include these
+  # verbs, so they are listed explicitly.
+  - apiGroups: [""]
+    resources: ["pods/log", "pods/exec", "pods/portforward"]
+    verbs: ["get", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hermes-ops
+  labels:
+    app.kubernetes.io/name: hermes
+subjects:
+  - kind: ServiceAccount
+    name: hermes
+    namespace: hermes
+roleRef:
+  kind: ClusterRole
+  name: hermes-ops
+  apiGroup: rbac.authorization.k8s.io

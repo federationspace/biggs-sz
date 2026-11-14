@@ -134,6 +134,13 @@ kubernetes/apps/<ns>/<app>/
   `hermes.gregbob.net` behind Pocket ID OIDC. Image: the `catalog-harness2`
   build of shrinedogg/hermes-agent with the harness2 plugin vendored (same
   image as `hermes.biggs.dog`).
+  - **kubectl in the pod**: the `install-kubectl` init container copies
+    kubectl v1.36.4 (same k8s minor as cluster0) into
+    `/opt/data/.local/bin` on the PVC (already on the gateway PATH), and
+    the pod's ServiceAccount `hermes` carries read + debug RBAC only
+    (`app/rbac.yaml`: get/list/watch on everything incl. secrets, plus
+    pods/log, pods/exec, pods/port-forward). No write verbs: persistent
+    changes still go through a PR in this repo.
   - **Matrix E2EE caveat**: the E2EE key store is
     `/opt/data/platforms/matrix/store/` on the `hermes-data` PVC
     (`crypto.db` plus sync state). The account's identity and every Megolm
