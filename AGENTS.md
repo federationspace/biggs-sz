@@ -130,10 +130,7 @@ kubernetes/apps/<ns>/<app>/
   `silo` pins to `worker-00` (Intel iGPU, `i915` driver, requests
   `gpu.intel.com/i915`) and `continuwuity` pins to `worker-01`.
 - **Hermes**: `hermes/hermes` is the Matrix bot (dashboard at
-  `hermes.gregbob.net`). `hermes/harness2` is a separate Harness² workbench
-  with its own PVC and dashboard (`harness2.gregbob.net`, own login) and no
-  Matrix token, by design; it shares only the bot's `config.yaml` and
-  `NOUS_API_KEY`. See `docs/runbooks/harness2.md`.
+  `hermes.gregbob.net`).
 - **Auth**: `auth/pocket-id` is the OIDC provider (`id.gregbob.net`,
   passkey-only), backed by `cnpg-pocket-id`. Only infrastructure settings
   (URL, DB, encryption key) are in the manifests; Application Configuration
