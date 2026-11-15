@@ -218,10 +218,6 @@ spec:
             # scripts test -n, so "false" still enables gamescope).
             - name: RUN_SWAY
               value: "true"
-            # Local time zone (repo-wide value; see the /etc/localtime
-            # link in the command below). The node and image default to UTC.
-            - name: TZ
-              value: "America/Detroit"
             - name: PROTON_LOG
               value: "1"
             # The steam image (Ubuntu-based) ships the same GNOME glycin
@@ -568,7 +564,8 @@ spec:
               fi
 
               # Local time for the Steam/BPM clock: the image links
-              # /etc/localtime to Etc/UTC. TZ (env above) covers processes
+              # /etc/localtime to Etc/UTC. TZ (set by the operator from
+              # wolfConfig.runtimeVariables.timeZone below) covers processes
               # that read it; also point /etc/localtime at TZ for those that
               # read the file instead (Steam's pressure-vessel runtime
               # shares this container's /etc/localtime). Still root here.
@@ -617,3 +614,9 @@ spec:
       # See the firefox app above: pins the session to the allocated R9700's
       # fixed render-node path.
       renderNode: /dev/dri/renderD200
+      # Local time zone (repo-wide value). The operator sets TZ from this on
+      # the wolf, app and pulseaudio containers. It is the ONLY source: the
+      # operator appends its own TZ to the app container env, so a TZ entry
+      # in the container env above duplicates the key and server-side apply
+      # rejects the session Deployment (no worker pod, Moonlight launch error).
+      timeZone: America/Detroit
