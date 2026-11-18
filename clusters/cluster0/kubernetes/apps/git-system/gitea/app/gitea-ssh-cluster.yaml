@@ -1,0 +1,17 @@
+---
+# In-cluster only: stable name for the headless gitea-ssh backend.
+# NOT exposed externally.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitea-ssh-cluster
+  namespace: git-system
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/instance: gitea
+  ports:
+  - name: ssh
+    port: 22
+    targetPort: 2222
+    protocol: TCP
