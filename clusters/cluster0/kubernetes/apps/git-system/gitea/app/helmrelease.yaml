@@ -485,6 +485,17 @@ spec:
             secretKeyRef:
               name: gitea-user-password
               key: password
+        # Public URL scheme. The PVC's app.ini still carries
+        # ROOT_URL = http://git.gregbob.net and PROTOCOL = http (set outside
+        # these values; the chart's init merge preserves it), and the
+        # chart's helper defaults PROTOCOL to http because TLS terminates
+        # at the edge, which the chart cannot see. Env overrides app.ini,
+        # so this makes Gitea build https URLs (OAuth2 redirect to Pocket
+        # ID, webhooks, links in emails).
+        - name: GITEA__server__ROOT_URL
+          value: https://git.gregbob.net
+        - name: GITEA__server__PROTOCOL
+          value: https
 
       ## @param gitea.additionalConfigSources Additional configuration from secret or configmap
       additionalConfigSources: []
