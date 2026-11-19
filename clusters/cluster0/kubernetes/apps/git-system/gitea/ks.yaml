@@ -19,4 +19,8 @@ spec:
   retryInterval: 1m
   timeout: 2m
   dependsOn:
+    # ClusterSecretStore for the ExternalSecret.
+    - name: secretstore
+    # The OIDC provider for sign-in (https://id.gregbob.net).
+    - name: pocket-id
     - name: cnpg-databases

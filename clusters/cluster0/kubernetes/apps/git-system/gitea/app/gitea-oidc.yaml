@@ -1,0 +1,32 @@
+---
+# Materializes Secret "gitea-oidc", referenced by the HelmRelease's
+# gitea.oauth[0].existingSecret (the chart maps its key/secret entries to
+# GITEA_OAUTH_KEY_0 / GITEA_OAUTH_SECRET_0).
+#
+# 1Password item (vault biggs-sz):
+#   - gitea-oidc
+#       client-id      Client ID of the Pocket ID OIDC client "Gitea"
+#                      (callback https://git.gregbob.net/user/oauth2/PocketID/callback).
+#       client-secret  That client's secret.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: gitea-oidc
+  namespace: git-system
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: onepassword-connect
+  target:
+    name: gitea-oidc
+    creationPolicy: Owner
+  data:
+    - secretKey: key
+      remoteRef:
+        key: gitea-oidc
+        property: client-id
+    - secretKey: secret
+      remoteRef:
+        key: gitea-oidc
+        property: client-secret

@@ -429,7 +429,15 @@ spec:
       # Either specify inline `key` and `secret` or refer to them via `existingSecret`
       ## @param gitea.oauth OAuth configuration
       oauth:
-        []
+        # Pocket ID sign-in (https://id.gregbob.net). Additive: the
+        # username/password form stays available and
+        # gitea.config.service.DISABLE_REGISTRATION above stays true, so no
+        # new accounts are created; first use links the Pocket ID identity
+        # to the signed-in account.
+        - name: PocketID
+          provider: openidConnect
+          existingSecret: gitea-oidc
+          autoDiscoverUrl: https://id.gregbob.net/.well-known/openid-configuration
         # - name: 'OAuth 1'
         #   provider:
         #   key:
