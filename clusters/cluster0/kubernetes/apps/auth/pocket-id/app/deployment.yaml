@@ -28,7 +28,7 @@ spec:
       hostUsers: false
       containers:
         - name: pocket-id
-          image: ghcr.io/pocket-id/pocket-id:v2.19.2
+          image: ghcr.io/pocket-id/pocket-id:v2.19.3
           imagePullPolicy: IfNotPresent
           env:
             # Public URL; passkeys are bound to this domain, so changing it
