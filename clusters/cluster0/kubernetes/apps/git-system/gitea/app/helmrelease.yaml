@@ -52,8 +52,13 @@ spec:
     strategy:
       type: "RollingUpdate"
       rollingUpdate:
-        maxSurge: "100%"
-        maxUnavailable: 0
+        # Single replica on a ReadWriteOnce ceph-block volume: with a surge
+        # pod the new one waits for the RBD the old pod still holds
+        # (Multi-Attach), and the old one cannot scale down until the new
+        # pod is ready, so the rollout deadlocks. Stopping the old pod first
+        # costs one brief outage per rollout.
+        maxSurge: "0%"
+        maxUnavailable: 1
 
     ## @param clusterDomain cluster domain
     clusterDomain: cluster.local
