@@ -51,8 +51,8 @@ worth much anyway, so that's stickiness I can live with.
   cluster, but both are unused legacy). Pin a VIP with the
   `io.cilium/lb-ipam-ips` annotation rather than `spec.loadBalancerIP`.
 - Assigned VIPs from the pool (`192.168.2.6-192.168.2.254`): `.7`
-  k8s-gateway, `.8` lan-dns, `.9` the `wildcard-gregbob-net` Gateway, `.10`
-  livekit media. `.6` is
+  k8s-gateway, `.8` lan-dns, `.9` the `wildcard-gregbob-net` Gateway,
+  `.10` livekit media, `.11` dreamcast (Moonlight proxy). `.6` is
   free (it was the IRC VIP, removed 2026-09-14).
 
 See **Core components** below for storage, networking, secrets, and
@@ -64,8 +64,12 @@ certificate details.
 clusters/cluster0/
 ├── flux-system/                # FluxInstance + Helm/OCI/Git repository sources
 └── kubernetes/apps/
+    ├── ai-system/                 # agentgateway-ai, open-webui, radiance, radiance-dashboard
+    ├── auth/                       # oauth2-proxy, pocket-id
     ├── cert-manager/            # cert-manager (ACME/DNS-01 issuers)
     ├── databases/                # cnpg (CloudNativePG)
+    ├── dreamcast/                 # fenrir, fenrir-crds, gpu-arbiter-instance,
+    │                             # gpu-arbiter-operator
     ├── external-secrets/         # external-secrets, onepassword-connect
     ├── games/                     # worldofpunchout (static browser game; delete the
     │                             # whole dir to remove the namespace)
@@ -73,16 +77,17 @@ clusters/cluster0/
     ├── gregbob/                   # gregbob, personal site/services
     ├── hermes/                    # hermes (Matrix cluster assistant, hermes.gregbob.net)
     ├── kube-system/                # cilium (CNI + BGP/L2), nfs, nfd, intel-gpu-plugin,
-    │                              # volsync, snapshot-controller
+    │                              # volsync, snapshot-controller, amd-gpu-device-plugin,
+    │                              # generic-device-plugin
     ├── livekit/                   # livekit (self-hosted LiveKit SFU + lk-jwt-service,
     │                              # MatrixRTC for Matrix calls on gregbob.net)
     ├── matrix/                    # continuwuity, sable
-    ├── media/                     # jellyfin, plex, sonarr, radarr, lidarr, readarr, prowlarr,
+    ├── media/                     # jellyfin, plex, sonarr, radarr, lidarr, listenarr, readarr, prowlarr,
     │                             # sabnzbd, ombi, homarr, romm, rreading-glasses, epub-only,
     │                             # pinepods, silo, media-storage
     ├── network/                   # agentgateway, k8s-gateway, lan-dns
     ├── observability/             # victoria-metrics, victoria-logs, grafana-operator,
-    │                             # matrix-alertmanager-receiver
+    │                             # matrix-alertmanager-receiver, prometheus-operator-crds
     ├── renovate/                  # renovate, self-hosted; keeps chart/image pins current
     └── rook-ceph/                 # rook-ceph, Ceph operator + cluster, backs `ceph-block` SC
 ```
@@ -194,8 +199,9 @@ Secrets follow a two-tier model:
 
 ## Hardcoded values to change if you fork this
 
-- `kubernetes.io/hostname: control-00` / `worker-00` / `worker-01`,
-  node pins for control-plane-hosted, iGPU-transcoding, and Matrix workloads.
+- `kubernetes.io/hostname: control-00` / `worker-00` / `worker-01` /
+  `worker-02`, node pins for control-plane-hosted, iGPU-transcoding, and
+  Matrix workloads.
 - `CiliumLoadBalancerIPPool` blocks in `kube-system/cilium/bgp/bgp-config.yaml`,
   the LoadBalancer IP range, plus the `io.cilium/lb-ipam-ips` annotations that
   pin individual VIPs (`lan-dns`).
