@@ -5,7 +5,7 @@
 # given room. It has no E2EE support, so Mercury must stay unencrypted.
 # The provider authenticates as @alertbot:gregbob.net using the token in
 # the flux-matrix-token Secret.
-apiVersion: notification.toolkit.fluxcd.io/v1beta3
+apiVersion: notification.toolkit.fluxcd.io/v1
 kind: Provider
 metadata:
   name: matrix
