@@ -21,7 +21,7 @@ spec:
         # securityContext (runAsNonRoot would break PUID/PGID).
         # First start downloads a static ffmpeg build into the config PVC
         # (~194MB, once per fresh PVC); accepted as-is.
-        - image: ghcr.io/listenarrs/listenarr:canary-1.9.2
+        - image: ghcr.io/listenarrs/listenarr:canary-1.10.5
           imagePullPolicy: Always
           name: listenarr
           env:
