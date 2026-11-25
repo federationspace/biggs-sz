@@ -76,11 +76,9 @@ spec:
       apps:
         github:
           accounts: [federationspace]
-          # PLACEHOLDER: replace with the fresh biggs-sz GitHub App's client
-          # ID once it exists (user-owned step; install the App on the
-          # federationspace repos it should review). The instance starts and
-          # serves with the placeholder; GitHub auth is inert until it is real.
-          clientId: "PLACEHOLDER-SET-WHEN-APP-EXISTS"
+          # Client ID of the fresh biggs-sz GitHub App (App ID 5920685),
+          # installed on the federationspace repos it should review.
+          clientId: "Iv23li3jgO631scshoRh"
           privateKey: { env: GITHUB_APP_PRIVATE_KEY }
           webhookSecret: { env: GITHUB_APP_WEBHOOK_SECRET }
       providers:
