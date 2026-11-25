@@ -16,7 +16,7 @@ Throughout, substitute:
 NODE=worker-02              # new node name (k3s uses the hostname)
 NODE_IP=192.168.2.60        # its address on the LAN
 CONTROL_IP=192.168.2.32     # control-00's apiserver NIC (see /etc/hosts note)
-K3S_VERSION=v1.34.3+k3s1    # must match the rest of the fleet
+K3S_VERSION=v1.36.6+k3s1    # must match the rest of the fleet
 ```
 
 ---
@@ -26,7 +26,7 @@ K3S_VERSION=v1.34.3+k3s1    # must match the rest of the fleet
 | Item | Value |
 | --- | --- |
 | Distro on every node | Ubuntu Server 24.04 LTS (`24.04.5`) |
-| k3s | `v1.34.3+k3s1`, agents run plain `k3s agent`, no extra flags |
+| k3s | `v1.36.6+k3s1`, agents run plain `k3s agent`, no extra flags |
 | Join token | `/var/lib/rancher/k3s/server/node-token` on control-00 |
 | apiserver URL | `https://192.168.2.32:6443` |
 | CNI | Cilium (kube-proxy replacement, BGP for LoadBalancer IPs) |
@@ -356,7 +356,7 @@ newer than the server; that is unsupported and skew will bite silently.
 
 ```sh
 curl -sfL https://get.k3s.io | \
-  INSTALL_K3S_VERSION=v1.34.3+k3s1 \
+  INSTALL_K3S_VERSION=v1.36.6+k3s1 \
   K3S_URL=https://192.168.2.32:6443 \
   K3S_TOKEN='<token>' \
   sh -
