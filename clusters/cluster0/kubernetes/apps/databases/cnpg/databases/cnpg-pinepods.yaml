@@ -1,0 +1,58 @@
+# cnpg-pinepods: PinePods app database, PostgreSQL 18.1.
+#
+# RESTORE MANIFEST (2026-11-25): the original cluster was accidentally deleted
+# from Git (commit 862890e, "temporary removal") and Flux pruned it, including
+# the local-path PVCs, so the local data is gone. This file recreates the
+# cluster from the barman-cloud offsite backup (B2 bucket biggs-sz-cnpg,
+# prefix cnpg-pinepods/): the 2026-11-25 03:30 UTC base backup plus
+# continuously archived WAL, the last segment having been archived at
+# 18:50:28 UTC, minutes before the deletion. Expected data loss: writes in
+# that final window only.
+#
+# This is a recovery manifest, not a byte-identical revert of the deleted
+# file:
+#   - bootstrap.recovery.source + externalClusters point the cluster at the
+#     barman server cnpg-pinepods (full recovery to the latest archived WAL,
+#     the barman-cloud plugin restore pattern).
+#   - bootstrap is immutable on the live object, so this file keeps the
+#     recovery source permanently; re-applying the original initdb block
+#     would conflict.
+#   - The original postInitApplicationSQL grants are initdb-only and already
+#     live in the restored data; they do not need to run again.
+# Everything else (instances, image, sizing, storage, barman WAL archiver on
+# the offsite ObjectStore) is unchanged. WAL archiving resumes on the same
+# barman path (s3://biggs-sz-cnpg/cnpg-pinepods/), continuing the series.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cnpg-pinepods
+  namespace: cnpg-system
+spec:
+  instances: 3
+  bootstrap:
+    recovery:
+      source: cnpg-pinepods
+  externalClusters:
+    - name: cnpg-pinepods
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: offsite
+          serverName: cnpg-pinepods
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  resources:
+    requests:
+      memory: 500Mi
+      cpu: 500m
+    limits:
+      memory: 500Mi
+  storage:
+    size: 10Gi
+    storageClass: local-path
+  # Barman Cloud plugin: WAL archiving to the offsite ObjectStore (B2).
+  # B4 of #261; proven on the cnpg-renovate pilot (#326).
+  plugins:
+  - name: barman-cloud.cloudnative-pg.io
+    isWALArchiver: true
+    parameters:
+      barmanObjectName: offsite
