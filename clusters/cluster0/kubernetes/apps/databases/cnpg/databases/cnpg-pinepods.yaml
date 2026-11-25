@@ -22,11 +22,23 @@
 # Everything else (instances, image, sizing, storage, barman WAL archiver on
 # the offsite ObjectStore) is unchanged. WAL archiving resumes on the same
 # barman path (s3://biggs-sz-cnpg/cnpg-pinepods/), continuing the series.
+#
+# The cnpg.io/skipEmptyWalArchiveCheck annotation is required for this
+# in-place restore: the barman-cloud plugin's one-shot restore pre-flight
+# (barman-cloud-check-wal-archive) refuses to archive into a WAL archive that
+# is not empty, and the cnpg-pinepods archive legitimately holds the source
+# WALs we are restoring from. The restored cluster is a direct continuation
+# of the same timeline (the last archived segment, ...0000002F, is the last
+# one in the bucket), so continuing the same barman server is safe; the
+# annotation is the documented opt-out (CNPG 1.30 reads it and passes the
+# decision to plugin v0.16, which skips the check).
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
   name: cnpg-pinepods
   namespace: cnpg-system
+  annotations:
+    cnpg.io/skipEmptyWalArchiveCheck: "enabled"
 spec:
   instances: 3
   bootstrap:
