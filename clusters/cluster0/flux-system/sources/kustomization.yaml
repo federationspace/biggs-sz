@@ -25,3 +25,4 @@ resources:
   - oauth2-proxy-repo.yaml
   - fenrir-git.yaml
   - fenrir-oci.yaml
+  - kritika-oci.yaml
