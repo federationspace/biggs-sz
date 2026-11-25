@@ -1,0 +1,163 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/fluxcd-community/flux2-schemas/main/helmrelease-helm-v2.json
+# Kritika (self-hosted AI pull-request reviewer) on the cluster0 wildcard
+# edge: kritika.gregbob.net -> wildcard-gregbob-net -> kritika.kritika.svc:8080.
+# Port of the biggs.dog deployment (clusters/cluster1/kubernetes/apps/kritika
+# at 400c691), adapted to this repo's conventions.
+#
+# Chart: kritika from oci://ghcr.io/home-operations/charts/kritika
+# (OCIRepository `kritika` in flux-system), pinned there, matching the house
+# chartRef pattern.
+#
+# Postgres: external, CNPG cluster cnpg-kritika (3 instances, local-path,
+# PG 18 + VectorChord) - see
+# clusters/cluster0/kubernetes/apps/databases/cnpg/databases/cnpg-kritika.yaml.
+# The chart reads only the `uri` key of two basic-auth Secrets rendered by
+# app/external-secrets.yaml (1Password items kritika-user-password,
+# kritika-app-password). Since chart 0.0.116 the runner holds no database
+# credential.
+#
+# Serve env (admin password, GitHub App private key + webhook secret, the
+# Nous Portal API key, the in-cluster Radiance engine key) comes from the
+# kritika-credentials ExternalSecret.
+#
+# Review model: DeepSeek V4.1 Flash 1017 via the Nous Research portal
+# inference API (OpenAI-compatible), the user's portal subscription. Model id
+# deepseek/deepseek-v4.1-flash-1017 (1M context, reasoning, default effort
+# high). Pricing: promo $0.03/$0.12 per 1M in/out verified 2026-11-25 (list
+# $0.15/$0.60); rates drift, and the dashboard marks calls Unpriced rather
+# than failing if the API reports no cost and this block goes stale.
+#
+# The instance does not review until the 1Password items exist (see the PR
+# body) and the GitHub App clientId below is real.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kritika
+  namespace: kritika
+spec:
+  interval: 3m
+  chartRef:
+    kind: OCIRepository
+    name: kritika
+    namespace: flux-system
+  install:
+    createNamespace: false
+    timeout: 10m
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    timeout: 10m
+    crds: CreateReplace
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    replicas: 2
+    image:
+      # Pinned per repo rule (no `latest`); the chart also pins the serve
+      # image by digest, which wins over this tag, so the tag only acts as
+      # the fallback when the chart ships no digest. Same pins as biggs.dog.
+      tag: "0.0.90"
+    database:
+      # Two basic-auth Secrets in this namespace, each with username /
+      # password / uri keys, rendered by app/external-secrets.yaml. The chart
+      # reads only the `uri` key.
+      owner:
+        existingSecret: kritika-postgres-credentials
+      app:
+        existingSecret: kritika-postgres-app
+    config:
+      webUrl: https://kritika.gregbob.net
+      auth:
+        admin:
+          password: { env: ADMIN_PASSWORD }
+      apps:
+        github:
+          accounts: [federationspace]
+          # PLACEHOLDER: replace with the fresh biggs-sz GitHub App's client
+          # ID once it exists (user-owned step; install the App on the
+          # federationspace repos it should review). The instance starts and
+          # serves with the placeholder; GitHub auth is inert until it is real.
+          clientId: "PLACEHOLDER-SET-WHEN-APP-EXISTS"
+          privateKey: { env: GITHUB_APP_PRIVATE_KEY }
+          webhookSecret: { env: GITHUB_APP_WEBHOOK_SECRET }
+      providers:
+        # DeepSeek V4.1 Flash 1017 via the Nous Research portal inference
+        # API (OpenAI-compatible). Key: Portal API key, 1Password item
+        # nous-api-key (property api-key) in the biggs-sz vault.
+        nous:
+          type: openai
+          baseUrl: https://inference-api.nousresearch.com/v1
+          apiKey: { env: NOUS_API_KEY }
+          # Promo pricing verified 2026-11-25 (list $0.15/$0.60 per 1M).
+          pricing:
+            deepseek/deepseek-v4.1-flash-1017: { input: 0.03, output: 0.12 }
+        # Local Radiance on ai-00 (qwen3.8-27b-fp8, ai-system):
+        # OpenAI-compatible in-cluster server, model id `local`, engine key
+        # from the existing 1Password item radiance (property api-key), the
+        # same key ai-system/radiance runs with. Zero marginal cost.
+        # Caveat: dreamcast's GPU arbiter scales Radiance to 0 while a game
+        # session runs, so the fallback is unavailable then.
+        local:
+          type: openai
+          baseUrl: http://radiance.ai-system.svc.cluster.local:8000/v1
+          apiKey: { env: RADIANCE_API_KEY }
+          pricing:
+            local: { input: 0, output: 0 }
+      agent:
+        # DeepSeek V4.1 Flash 1017 is a reasoning model (default effort
+        # high). Biggs.dog ran its reasoning-model reviews at these bounds
+        # after 45m proved too short; docs caps: timeout 2h35m (tokens
+        # 4M default). A review/follow-up runner Job's deadline derives from
+        # this timeout, so no runner.jobTemplate override is needed.
+        timeout: 90m
+        tokens: 8000000
+      review:
+        # Runs on DeepSeek V4.1 Flash 1017 via the Nous portal. Fallback to
+        # the in-cluster Radiance model (zero marginal cost) if a call fails
+        # after provider retries. Embeddings off (no embedding block),
+        # pollInterval default (10m).
+        model: "nous/deepseek/deepseek-v4.1-flash-1017"
+        fallback: "local/local"
+    envFrom:
+      - secretRef:
+          name: kritika-credentials
+    networkPolicy:
+      enabled: true
+      type: cilium
+      # 443: GitHub API + the Nous inference API (the chart default, listed
+      # explicitly because egressPorts REPLACES the default when set).
+      egressPorts:
+        - 443
+      # Postgres lives in cnpg-system, NOT the release namespace: this
+      # selector scopes the kritika serve pods' Postgres egress. Since chart
+      # 0.0.116 the runner policy opens no Postgres egress at all.
+      postgres:
+        namespace: cnpg-system
+        podSelector:
+          cnpg.io/cluster: cnpg-kritika
+      # In-cluster Radiance (ai-system) for the local fallback provider:
+      # name the pods and the port they listen on, not the Service.
+      extraEgress:
+        - to:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: ai-system
+              podSelector:
+                matchLabels:
+                  app: radiance
+          ports:
+            - port: 8000
+              protocol: TCP
+    # Monitoring stack on cluster0 is VictoriaMetrics, not prometheus-operator:
+    # all chart monitoring stays off (defaults). /metrics is served on :8081
+    # regardless; a VMServiceScrape is a noted follow-up, not this PR.
+    monitoring:
+      serviceMonitor:
+        enabled: false
+      prometheusRule:
+        enabled: false
+      dashboards:
+        enabled: false

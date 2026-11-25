@@ -1,0 +1,15 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: cnpg-kritika-daily
+  namespace: cnpg-system
+spec:
+  # Staggered from the 03:00-03:20 base backups (B4 of #261); 03:30 is free.
+  schedule: "0 30 3 * * *"
+  immediate: true
+  backupOwnerReference: self
+  cluster:
+    name: cnpg-kritika
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnativepg.io

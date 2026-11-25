@@ -1,0 +1,12 @@
+---
+# kritika: self-hosted AI pull-request reviewer. Postgres lives in
+# cnpg-system (cnpg-kritika, PG 18 + VectorChord); the review model is DeepSeek
+# V4.1 Flash 1017 via the Nous Research portal inference API.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kritika
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline
