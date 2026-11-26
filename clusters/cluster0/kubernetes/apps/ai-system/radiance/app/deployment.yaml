@@ -67,7 +67,7 @@ spec:
           # Docker Hub stilldeadcode/radiance 1.17.0, linux/amd64 platform
           # manifest (the tag is an OCI index). Fast-moving image: re-pin on
           # engine updates, never run :latest.
-          image: docker.io/stilldeadcode/radiance:1.17.0@sha256:6fb0e99bfb862e17cc15cb7b2f116c7dbdc831df59f82456a0691122e6cf5330
+          image: docker.io/stilldeadcode/radiance:2.3.0@sha256:1e0fe6a2c310e483e9e66e8446ba274ee767f06044f6761ababd593d7517af12
           imagePullPolicy: IfNotPresent
           args:
             - --model
