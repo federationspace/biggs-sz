@@ -31,6 +31,9 @@ metadata:
   name: &app kagent-credentials
   namespace: flux-system
 spec:
+  dependsOn:
+    # ClusterSecretStore (onepassword-connect) for the ExternalSecrets.
+    - name: secretstore
   targetNamespace: ai-system
   commonMetadata:
     labels:
@@ -41,6 +44,13 @@ spec:
     kind: GitRepository
     name: flux-system
   wait: true
+  healthCheckExprs:
+    # wait alone does not gate on ExternalSecret readiness; the main chart
+    # must not install before both Secrets exist (same pattern as
+    # agentgateway-ai-secrets).
+    - apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      current: has(status.conditions) && status.conditions.exists(e, e.type == 'Ready' && e.status == 'True')
   interval: 3m
   retryInterval: 1m
   timeout: 2m
