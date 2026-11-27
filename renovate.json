@@ -155,6 +155,12 @@
       "automerge": false
     },
     {
+      "description": "Plex is excluded from Renovate: Plex publishes preview (transcoder) builds as ordinary version tags on the stable train and later deletes them (1.43.7.11114-4b588ea35, Nov 2026; its deletion took the plex pod down). No tag marker distinguishes preview from stable, so Renovate cannot be constrained to the stable train; upgrades stay manual/opt-in",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["plexinc/pms-docker"],
+      "enabled": false
+    },
+    {
       "description": "Linuxserver media apps (sonarr, radarr, prowlarr, sabnzbd): their -lsNNN build bumps read as patch under the linuxserver regex, so the media-apps patch automerge above would otherwise apply. In practice it never fired (no CI or status checks, so branch automerge waits out prNotPendingHours and opens a PR after ~25h), but adding any status check would start merging these to main unattended. Keep every bump a reviewed PR, like jellyfin and plex",
       "matchManagers": ["kubernetes"],
       "matchDatasources": ["docker"],
