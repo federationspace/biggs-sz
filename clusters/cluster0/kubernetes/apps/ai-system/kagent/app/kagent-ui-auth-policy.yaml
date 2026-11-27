@@ -4,6 +4,9 @@
 # cluster-internal. Same shape as media/listenarr (listenarr-sso policy).
 # The ai-system AgentgatewayPolicy -> auth/oauth2-proxy ReferenceGrant
 # already exists (auth/extauth-to-oauth2-proxy).
+# NOTE: path and redirect are CEL expressions; the path must keep its
+# literal double quotes (a CEL string literal), as in the listenarr and
+# radiance-dashboard policies.
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:
@@ -32,5 +35,5 @@ spec:
         - x-auth-request-email
         - x-auth-request-groups
         - x-auth-request-preferred-username
-        path: "/oauth2/auth"
+        path: '"/oauth2/auth"'
         redirect: '"https://auth.gregbob.net/oauth2/start?rd=https://kagent.gregbob.net" + request.path'
