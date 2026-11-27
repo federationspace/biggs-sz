@@ -19,6 +19,7 @@ spec:
   sourceRef:
     kind: GitRepository
     name: flux-system
+  targetNamespace: ai-system
   wait: true
   interval: 3m
   retryInterval: 1m
@@ -59,7 +60,10 @@ spec:
   sourceRef:
     kind: GitRepository
     name: flux-system
-  wait: true
+  # wait: false (AGENTS convention: nothing depends on this Kustomization);
+  # HelmRelease readiness is the convergence signal, and the first
+  # converge of 4 workloads exceeds a 2m wait window.
+  wait: false
   interval: 3m
   retryInterval: 1m
   timeout: 2m

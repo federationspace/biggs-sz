@@ -1,0 +1,17 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: cnpg-kagent-daily
+  namespace: cnpg-system
+spec:
+  # Staggered off the 03:00-04:10 sibling base backups; 04:20 is free.
+  # Without this the barman WAL archiver alone provides no base backup,
+  # so CNPGBackupStale (26h) fires permanently.
+  schedule: "0 20 4 * * *"
+  immediate: true
+  backupOwnerReference: self
+  cluster:
+    name: cnpg-kagent
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnativepg.io
