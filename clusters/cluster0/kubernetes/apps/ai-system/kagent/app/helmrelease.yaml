@@ -15,7 +15,32 @@ spec:
     name: kagent
     namespace: flux-system
   interval: 3m
+  # Flux's helm-controller records OCI chart versions as
+  # "<version>+<digest12>" (e.g. 0.10.7+b3c52625e511) and the 0.10.x chart
+  # stamps that unsanitized string into (a) the app.kubernetes.io/version and
+  # helm.sh/chart labels of every rendered object ("+" is an invalid label
+  # value -> InstallFailed) and (b) the controller/ui/agent image tags as a
+  # last-resort fallback (tags that do not exist on GHCR). The 1.0.1 chart
+  # sanitizes the label; 0.10.x does not. Fix (a) with the kustomize
+  # post-renderer below and (b) by pinning the chart's top-level "tag" value,
+  # which the templates coalesce ahead of .Chart.Version.
+  postRenderers:
+    - kustomize:
+        patches:
+          - patch: |-
+              - op: replace
+                path: /metadata/labels/app.kubernetes.io~1version
+                value: "0.10.7"
+              - op: replace
+                path: /metadata/labels/helm.sh~1chart
+                value: "kagent-0.10.7"
+            target:
+              labelSelector: app.kubernetes.io/managed-by=Helm
   values:
+    # Image tag fallback: templates use coalesce .Values.tag ... .Chart.Version
+    # for controller/ui/agent images; .Chart.Version carries the invalid
+    # "+digest" suffix under Flux OCI installs.
+    tag: "0.10.7"
     providers:
       default: openAI
       openAI:
