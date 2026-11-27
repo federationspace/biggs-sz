@@ -72,7 +72,35 @@ spec:
       webUrl: https://kritika.gregbob.net
       auth:
         admin:
+          # Local admin stays configured as the path in when every provider
+          # is down; the docs only keep this account while a password is set.
           password: { env: ADMIN_PASSWORD }
+        # Pocket ID OIDC sign-in for the dashboard. The dashboard speaks
+        # OIDC directly, so no oauth2-proxy front and no AgentgatewayPolicy:
+        # the webhook path stays unauthenticated and only the sign-in
+        # exchange talks to the issuer. The issuer is the in-cluster Pocket
+        # ID at id.gregbob.net.
+        #   issuer:     https://id.gregbob.net
+        #   client:     Kritika (created in Pocket ID, passkey user in group
+        #               kritika-admins; allowed user groups = that group)
+        #   callback:   https://kritika.gregbob.net/auth/callback/oidc
+        #   client secret: 1Password item kritika-credentials, field
+        #               OIDC_CLIENT_SECRET, mapped through the
+        #               kritika-credentials ExternalSecret below.
+        oidc:
+          name: Pocket ID
+          issuer: https://id.gregbob.net
+          clientId: 10f3597b-413c-498d-b109-fea1a5e8fb92
+          clientSecret: { env: OIDC_CLIENT_SECRET }
+          # `groups` is required so the groups claim comes back for the
+          # role mapping.
+          scopes: [openid, email, profile, groups]
+          # Roles come from the Pocket ID user-group claim, never from a
+          # profile field a user could edit: the kritika-admins group maps
+          # to admin, everyone else falls through to defaultRole.
+          rolesClaim: groups
+          roleMappingExpr: '"kritika-admins" in roles ? "admin" : ""'
+          defaultRole: member
       apps:
         github:
           accounts: [federationspace]
