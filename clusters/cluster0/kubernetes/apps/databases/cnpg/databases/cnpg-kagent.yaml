@@ -1,7 +1,9 @@
 # cnpg-kagent: Postgres for kagent 0.10.7 (agent memory, sessions, tools).
 # Single login kagent from 1Password item kagent-user-password (the name
-# the 1.0-line cutover reuses). Sizing mirrors cnpg-kritika; affinity and
-# the barman offsite plugin mirror the sibling clusters in this directory.
+# the 1.0-line cutover reuses). Affinity and the barman offsite plugin
+# mirror the sibling clusters in this directory. The 1Gi memory limit is
+# deliberately above cnpg-kritika's 300Mi: kagent's agent-memory and
+# session tables grow well past a single-app DB.
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:

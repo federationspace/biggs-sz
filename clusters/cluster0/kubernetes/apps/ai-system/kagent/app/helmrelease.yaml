@@ -15,7 +15,32 @@ spec:
     name: kagent
     namespace: flux-system
   interval: 3m
+  # Flux's helm-controller records OCI chart versions as
+  # "<version>+<digest12>" (e.g. 0.10.7+b3c52625e511) and the 0.10.x chart
+  # stamps that unsanitized string into (a) the app.kubernetes.io/version and
+  # helm.sh/chart labels of every rendered object ("+" is an invalid label
+  # value -> InstallFailed) and (b) the controller/ui/agent image tags as a
+  # last-resort fallback (tags that do not exist on GHCR). The 1.0.1 chart
+  # sanitizes the label; 0.10.x does not. Fix (a) with the kustomize
+  # post-renderer below and (b) by pinning the chart's top-level "tag" value,
+  # which the templates coalesce ahead of .Chart.Version.
+  postRenderers:
+    - kustomize:
+        patches:
+          - patch: |-
+              - op: replace
+                path: /metadata/labels/app.kubernetes.io~1version
+                value: "0.10.7"
+              - op: replace
+                path: /metadata/labels/helm.sh~1chart
+                value: "kagent-0.10.7"
+            target:
+              labelSelector: app.kubernetes.io/managed-by=Helm
   values:
+    # Image tag fallback: templates use coalesce .Values.tag ... .Chart.Version
+    # for controller/ui/agent images; .Chart.Version carries the invalid
+    # "+digest" suffix under Flux OCI installs.
+    tag: "0.10.7"
     providers:
       default: openAI
       openAI:
@@ -32,11 +57,24 @@ spec:
         urlFile: /etc/kagent-db/url
         vectorEnabled: false
     controller:
+      # Chart default pod securityContext is runAsNonRoot + RuntimeDefault
+      # with fsGroup commented out; the controller image runs as 65532:65532.
+      # Without fsGroup the mounted Secret file is root:root 0400 and uid
+      # 65532 cannot read /etc/kagent-db/url. fsGroup makes the file
+      # group-owned, so 0440 grants exactly the controller group read.
+      podSecurityContext:
+        runAsNonRoot: true
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       volumes:
         - name: kagent-db
           secret:
             secretName: kagent-postgres-url
-            defaultMode: 0400
+            # 0440 in decimal (288). Written as octal 0440 in values.yaml
+            # this survives helm's YAML-1.2 values parse as decimal 440
+            # (mode 0670); bare decimal is unambiguous in both parsers.
+            defaultMode: 288
       volumeMounts:
         - name: kagent-db
           mountPath: /etc/kagent-db
