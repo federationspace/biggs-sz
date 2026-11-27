@@ -1,0 +1,69 @@
+# kagent 0.10.7 controller + UI + tools + kmcp + built-in k8s-agent.
+# Every built-in agent defaults to enabled=true (demo profile); this values
+# block keeps k8s-agent (the test agent) and disables the rest.
+# Default ModelConfig -> local radiance (model "local"). Postgres is BYO
+# cnpg-kagent; the connection string Secret is mounted read-only at
+# /etc/kagent-db/url.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kagent
+  namespace: ai-system
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: kagent
+    namespace: flux-system
+  interval: 3m
+  values:
+    providers:
+      default: openAI
+      openAI:
+        provider: OpenAI
+        model: local
+        apiKeySecretRef: kagent-radiance-key
+        apiKeySecretKey: RADIANCE_API_KEY
+        config:
+          baseUrl: http://radiance.ai-system.svc:8000/v1
+    database:
+      postgres:
+        bundled:
+          enabled: false
+        urlFile: /etc/kagent-db/url
+        vectorEnabled: false
+    controller:
+      volumes:
+        - name: kagent-db
+          secret:
+            secretName: kagent-postgres-url
+            defaultMode: 0400
+      volumeMounts:
+        - name: kagent-db
+          mountPath: /etc/kagent-db
+          readOnly: true
+    k8s-agent:
+      enabled: true
+    kgateway-agent:
+      enabled: false
+    istio-agent:
+      enabled: false
+    promql-agent:
+      enabled: false
+    observability-agent:
+      enabled: false
+    argo-rollouts-agent:
+      enabled: false
+    helm-agent:
+      enabled: false
+    cilium-policy-agent:
+      enabled: false
+    cilium-manager-agent:
+      enabled: false
+    cilium-debug-agent:
+      enabled: false
+    grafana-mcp:
+      enabled: false
+    kagent-tools:
+      enabled: true
+    kmcp:
+      enabled: true

@@ -1,0 +1,39 @@
+# cnpg-kagent: Postgres for kagent 0.10.7 (agent memory, sessions, tools).
+# Single login kagent from 1Password item kagent-user-password (the name
+# the 1.0-line cutover reuses). Sizing mirrors cnpg-kritika; affinity and
+# the barman offsite plugin mirror the sibling clusters in this directory.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cnpg-kagent
+  namespace: cnpg-system
+spec:
+  instances: 3
+  affinity:
+    enablePodAntiAffinity: true
+    podAntiAffinityType: required
+  enableSuperuserAccess: false
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6-standard-bookworm
+  bootstrap:
+    initdb:
+      database: kagent
+      owner: kagent
+      dataChecksums: true
+      secret:
+        name: kagent-user-password
+  resources:
+    requests:
+      memory: 300Mi
+      cpu: 150m
+    limits:
+      memory: 1Gi
+  storage:
+    storageClass: local-path
+    size: 5Gi
+  # Barman Cloud plugin: WAL archiving to the offsite ObjectStore (B2),
+  # same as the sibling clusters.
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: offsite

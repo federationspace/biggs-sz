@@ -1,0 +1,11 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kagent-crds
+  namespace: ai-system
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: kagent-crds
+    namespace: flux-system
+  interval: 3m
