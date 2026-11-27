@@ -1,0 +1,36 @@
+---
+# SSO forward-auth in front of the kagent UI via oauth2-proxy (Pocket ID).
+# Protects the browser UI only; the controller agent API (8083) stays
+# cluster-internal. Same shape as media/listenarr (listenarr-sso policy).
+# The ai-system AgentgatewayPolicy -> auth/oauth2-proxy ReferenceGrant
+# already exists (auth/extauth-to-oauth2-proxy).
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: kagent-ui-sso
+  namespace: ai-system
+  labels:
+    app.kubernetes.io/name: kagent
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: kagent
+  traffic:
+    extAuth:
+      backendRef:
+        group: ""
+        kind: Service
+        name: oauth2-proxy
+        namespace: auth
+        port: 80
+      http:
+        allowedRequestHeaders:
+        - cookie
+        allowedResponseHeaders:
+        - x-auth-request-user
+        - x-auth-request-email
+        - x-auth-request-groups
+        - x-auth-request-preferred-username
+        path: "/oauth2/auth"
+        redirect: '"https://auth.gregbob.net/oauth2/start?rd=https://kagent.gregbob.net" + request.path'
