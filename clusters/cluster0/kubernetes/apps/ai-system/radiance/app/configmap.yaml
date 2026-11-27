@@ -1,0 +1,46 @@
+---
+# The engine's one YAML file (radiance 2.x reads every setting from it;
+# docs/GUIDE.md 4.0). Mounted read-only at /etc/radiance/radiance.yaml; the
+# container args are exactly `--config /etc/radiance/radiance.yaml`.
+#
+# The ${RADIANCE_*} variables are filled by the Kustomization's
+# postBuild.substitute (ks.yaml). The values substitute WITHOUT inner quotes,
+# the 1.x args rule reversed: the text lands inside this YAML document, where
+# the engine wants native types, so a bare 32 must stay an integer (a "32"
+# would be a string). A value that must stay a string quotes itself here
+# (the path and the name do not need to).
+#
+# Editing a knob in ks.yaml does not roll the Deployment by itself (the pod
+# spec names the ConfigMap, not its content). The Deployment's
+# radiance.biggs.sz/config annotation is built from the same variables, so
+# the template changes and rolls. A new ${RADIANCE_*} added here must be
+# added to that annotation too.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: radiance
+  namespace: ai-system
+  labels:
+    app: radiance
+data:
+  radiance.yaml: |
+    server:
+      host: "0.0.0.0"
+      port: 8000
+      api-key-env: RADIANCE_API_KEY
+      download-dir: /models
+    memory:
+      gpu-headroom-mib: ${RADIANCE_GPU_HEADROOM_MIB}
+    scheduler:
+      load-timeout: 600s
+    models:
+      ${RADIANCE_SERVED_NAME}:
+        # Fetched at sha256 9388f4c0d1a050b1254f5a9c0e47b7fbf753248792a29b5072f9698957badfcc
+        # (the HF LFS oid), 30876340224 bytes, onto the PVC before this PR
+        # merges.
+        model: ${RADIANCE_MODEL}
+        tp: ${RADIANCE_TP}
+        max-num-seqs: ${RADIANCE_MAX_NUM_SEQS}
+        max-model-len: ${RADIANCE_MAX_MODEL_LEN}
+        max-num-batched-tokens: ${RADIANCE_MAX_NUM_BATCHED_TOKENS}
+        kv-cache-dtype: ${RADIANCE_KV_CACHE_DTYPE}
