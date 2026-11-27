@@ -9,3 +9,4 @@ resources:
   - ./radiance/ks.yaml
   - ./agentgateway-ai/ks.yaml
   - ./radiance-dashboard/ks.yaml
+  - ./kagent/ks.yaml
