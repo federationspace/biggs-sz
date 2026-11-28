@@ -6,7 +6,7 @@
 #
 # Convergence sequence after merge (each stage is visible, not silent):
 #   1. ESO xcpng-mcp-token stays OutOfSync until the 1Password item
-#      xo-api-token (vault biggs-sz) exists.
+#      xoa-api-token (vault biggs-sz) exists.
 #   2. Pod xcpng-mcp stays CreateContainerConfigError until the ESO turns
 #      Ready and the Secret materializes.
 #   3. The pod goes Running; the bridge answers tcpSocket probes as soon as

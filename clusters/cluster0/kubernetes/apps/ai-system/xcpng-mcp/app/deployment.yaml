@@ -63,7 +63,7 @@ spec:
             - name: XO_URL
               value: https://192.168.2.22
             # Materialized by the xcpng-mcp-token ExternalSecret (1Password
-            # item xo-api-token, vault biggs-sz, field label `token`).
+            # item xoa-api-token, vault biggs-sz, field label `token`).
             - name: XO_TOKEN
               valueFrom:
                 secretKeyRef:
