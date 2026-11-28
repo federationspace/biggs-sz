@@ -14,4 +14,8 @@ spec:
   sseReadTimeout: 5m0s
   terminateOnClose: true
   timeout: 30s
-  url: http://xcpng-mcp.ai-system.svc:8080/mcp
+  # Must match the bridge's --allowed-host entries in deployment.yaml
+  # (xcpng-mcp.ai-system, with and without :8080). mcp-proxy rejects any
+  # other Host header with 421 "Misdirected Request", so do NOT use the
+  # .svc FQDN form here: xcpng-mcp.ai-system.svc is not in the allowlist.
+  url: http://xcpng-mcp.ai-system:8080/mcp
