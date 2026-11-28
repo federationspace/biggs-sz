@@ -63,7 +63,7 @@ spec:
         - name: install-kubectl
           # third-party image, pinned by tag-manifest digest (same
           # convention as the gateway image below).
-          image: docker.io/alpine/kubectl:1.37.2@sha256:02791a008d526a0b2ca9edc9692d86933b4a164e64d1c012eb46e30fca18d818
+          image: docker.io/alpine/kubectl:1.37.3@sha256:266a17d072fcee990846c7058d5c4857c73c3f6aec1f33a12036aea2b597e0df
           command:
             - /bin/sh
             - -c
