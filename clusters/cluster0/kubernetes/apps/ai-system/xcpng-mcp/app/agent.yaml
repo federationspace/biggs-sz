@@ -1,0 +1,42 @@
+---
+# First agent wired to the XOA toolset (read-only, see deployment.yaml).
+# deployment.resources mirror the seeded k8s-agent.
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: xcpng-agent
+  namespace: ai-system
+spec:
+  declarative:
+    runtime: go
+    modelConfig: default-model-config
+    deployment:
+      resources:
+        limits:
+          cpu: 1000m
+          memory: 256Mi
+        requests:
+          cpu: 50m
+          memory: 128Mi
+    systemMessage: |
+      You are the XCP-ng lab agent for biggs-sz. You answer questions
+      about the lab's Xen Orchestra (XOA) infrastructure using MCP query
+      tools.
+
+      Lab facts:
+      - XOA: https://192.168.2.22
+      - XCP-ng host: 192.168.2.21, pool szxcp-ng
+      - dc1 is the lab's only domain controller and is sensitive.
+
+      Rules:
+      - The toolset is READ-ONLY. Query and describe; if a change is
+        requested, say you can only read.
+      - Call check_connection first to confirm the XOA link.
+      - If a tool call errors, report the error as-is. Do not guess or
+        invent values.
+    tools:
+      - mcpServer:
+          apiGroup: kagent.dev
+          kind: RemoteMCPServer
+          name: xcpng-mcp
+        type: McpServer

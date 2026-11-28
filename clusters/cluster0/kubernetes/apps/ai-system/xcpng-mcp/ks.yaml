@@ -1,0 +1,48 @@
+# @xen-orchestra/mcp (official Xen Orchestra MCP server, Vates) as a kagent
+# MCP tool source for the lab XCP-ng pool. The stdio server is wrapped by
+# mcp-proxy into streamable HTTP at xcpng-mcp.ai-system:8080/mcp; kagent
+# reaches it through the RemoteMCPServer CR and xcpng-agent is the first
+# agent wired to it (read-only toolset, see app/deployment.yaml).
+#
+# Convergence sequence after merge (each stage is visible, not silent):
+#   1. ESO xcpng-mcp-token stays OutOfSync until the 1Password item
+#      xo-api-token (vault biggs-sz) exists.
+#   2. Pod xcpng-mcp stays CreateContainerConfigError until the ESO turns
+#      Ready and the Secret materializes.
+#   3. The pod goes Running; the bridge answers tcpSocket probes as soon as
+#      mcp-proxy binds :8080.
+#   4. RemoteMCPServer xcpng-mcp stays Accepted=False until the kagent
+#      controller completes initialize + tools/list against XOA (the server
+#      generates its tool list from the live XO OpenAPI spec at startup).
+#      The UDM rule 10.42.0.0/16 -> 192.168.2.22:443/tcp must exist or this
+#      step never passes.
+#   5. Agent xcpng-agent goes live.
+#
+# No healthCheckExprs on purpose: they would block this Kustomization (and
+# its prune) until the prerequisite 1Password item exists.
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app xcpng-mcp
+  namespace: flux-system
+spec:
+  dependsOn:
+    # kagent: RemoteMCPServer + Agent CRDs and ModelConfig
+    # default-model-config. secretstore: ClusterSecretStore
+    # onepassword-connect for the ExternalSecret.
+    - name: kagent
+    - name: secretstore
+  targetNamespace: ai-system
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  path: ./clusters/cluster0/kubernetes/apps/ai-system/xcpng-mcp/app
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  wait: true
+  interval: 3m
+  retryInterval: 1m
+  timeout: 2m
