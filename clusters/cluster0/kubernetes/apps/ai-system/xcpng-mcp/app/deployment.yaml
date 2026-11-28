@@ -1,0 +1,118 @@
+---
+# Xen Orchestra MCP bridge: mcp-proxy (stdio -> streamable HTTP) running the
+# official @xen-orchestra/mcp 1.4.4 server as a node child. node 22, its
+# shared libs and node_modules are baked into szkud/xo-mcp:1.4.4-node22
+# (see Dockerfile next to this file), so no init container and no staging
+# volume.
+#
+# READ-ONLY POSTURE: the package exposes only query tools unless
+# XO_MCP_ENABLE_ACTIONS=1 is set; that env is deliberately absent. Widening
+# to write tools later is a one-line env addition and requires a deliberate
+# decision (dc1, the lab's only domain controller, is sensitive).
+#
+# mcp-proxy serves /mcp on :8080; kagent connects through the
+# RemoteMCPServer xcpng-mcp by cluster DNS. v0.13.3+ validates the Host
+# header on a wildcard bind, so both DNS authorities are allow-listed;
+# otherwise every MCP request is answered 421 while the tcpSocket probes
+# keep the pod Ready.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: xcpng-mcp
+  namespace: ai-system
+  labels:
+    app.kubernetes.io/name: xcpng-mcp
+    app.kubernetes.io/version: "1.4.4"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: xcpng-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: xcpng-mcp
+        app.kubernetes.io/version: "1.4.4"
+    spec:
+      # No ServiceAccount: the pod calls no Kubernetes API (XOA only).
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: xo-mcp-bridge
+          image: docker.io/szkud/xo-mcp:1.4.4-node22
+          imagePullPolicy: IfNotPresent
+          args:
+            - --host=0.0.0.0
+            - --port=8080
+            - --transport=streamablehttp
+            - --pass-environment
+            # kagent connects by cluster DNS; allow-list both authorities
+            # (see header comment).
+            - --allowed-host=xcpng-mcp.ai-system:8080
+            - --allowed-host=xcpng-mcp.ai-system
+            - --
+            - /usr/local/bin/node
+            - /usr/local/lib/node_modules/@xen-orchestra/mcp/bin/xo-mcp.mjs
+          env:
+            - name: XO_URL
+              value: https://192.168.2.22
+            # Materialized by the xcpng-mcp-token ExternalSecret (1Password
+            # item xoa-api-token, vault biggs-sz, field label `token`).
+            - name: XO_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: xcpng-mcp-token
+                  key: token
+            # XOA is self-signed; undici (the MCP server's HTTP client)
+            # honors NODE_EXTRA_CA_CERTS. The cert is a ConfigMap, not a
+            # secret.
+            - name: NODE_EXTRA_CA_CERTS
+              value: /etc/xo/xoa-ca.crt
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          # TCP probes: mcp-proxy binds :8080 as soon as it starts; the node
+          # child and its XOA handshake are exercised by the kagent
+          # RemoteMCPServer reconciliation (Accepted condition), not by the
+          # probes.
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: xoa-ca
+              mountPath: /etc/xo
+              readOnly: true
+      volumes:
+        - name: xoa-ca
+          configMap:
+            name: xoa-ca

@@ -1,0 +1,17 @@
+---
+# kagent RemoteMCPServer pointing at the bridge. @xen-orchestra/mcp
+# generates its tool list from the live XO OpenAPI spec at startup ("no
+# hand-crafted mapping"), so the Agent below deliberately carries no
+# toolNames: a pinned list would go stale and silently yield zero tools.
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  name: xcpng-mcp
+  namespace: ai-system
+spec:
+  description: "Xen Orchestra MCP server: read-only XOA query tools for the lab XCP-ng pool"
+  protocol: STREAMABLE_HTTP
+  sseReadTimeout: 5m0s
+  terminateOnClose: true
+  timeout: 30s
+  url: http://xcpng-mcp.ai-system.svc:8080/mcp

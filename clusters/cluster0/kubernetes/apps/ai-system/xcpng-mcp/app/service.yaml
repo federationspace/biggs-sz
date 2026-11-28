@@ -1,0 +1,20 @@
+---
+# Cluster-internal endpoint for the kagent RemoteMCPServer
+# (http://xcpng-mcp.ai-system.svc:8080/mcp). No ingress: the bridge serves
+# in-cluster kagent only.
+apiVersion: v1
+kind: Service
+metadata:
+  name: xcpng-mcp
+  namespace: ai-system
+  labels:
+    app.kubernetes.io/name: xcpng-mcp
+    app.kubernetes.io/version: "1.4.4"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: xcpng-mcp
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
