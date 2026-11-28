@@ -12,6 +12,12 @@ spec:
     spec:
       chart: victoria-metrics-k8s-stack
       version: 0.99.1
+      # 0.99.1 bundles kube-state-metrics 9.0.1 (new default nodeSelector
+      # kubernetes.io/os=linux) and prometheus-node-exporter 5.1.0
+      # (containerSecurityContext now sets allowPrivilegeEscalation false,
+      # capabilities drop ALL, seccompProfile RuntimeDefault). Adding a
+      # privileged or SYS_ADMIN containerSecurityContext would additionally
+      # require allowPrivilegeEscalation: true.
       sourceRef:
         kind: HelmRepository
         name: victoria-metrics
