@@ -69,11 +69,19 @@ spec:
                 secretKeyRef:
                   name: xcpng-mcp-token
                   key: token
-            # XOA is self-signed; undici (the MCP server's HTTP client)
-            # honors NODE_EXTRA_CA_CERTS. The cert is a ConfigMap, not a
-            # secret.
-            - name: NODE_EXTRA_CA_CERTS
-              value: /etc/xo/xoa-ca.crt
+            # XOA serves its default self-signed cert (no SAN, no CN), so
+            # hostname verification can never succeed for 192.168.2.22 no
+            # matter which CA is presented, and the official package exposes
+            # no verify-off flag. This disables cert verification for THIS
+            # process only (mcp-proxy is python; the node child talks solely
+            # to XO_URL on the airgapped LAN). Lab-only compromise: the
+            # admin token still travels in a TLS session that a MITM on that
+            # segment could terminate. Proper fix remains: regenerate the
+            # XOA cert with -addext "subjectAltName=IP:192.168.2.22" and
+            # reinstate NODE_EXTRA_CA_CERTS + the cert ConfigMap (PR #417
+            # history).
+            - name: NODE_TLS_REJECT_UNAUTHORIZED
+              value: "0"
           ports:
             - name: http
               containerPort: 8080
@@ -108,11 +116,3 @@ spec:
                 - ALL
             seccompProfile:
               type: RuntimeDefault
-          volumeMounts:
-            - name: xoa-ca
-              mountPath: /etc/xo
-              readOnly: true
-      volumes:
-        - name: xoa-ca
-          configMap:
-            name: xoa-ca
