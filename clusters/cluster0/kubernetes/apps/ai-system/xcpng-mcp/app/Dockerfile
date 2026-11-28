@@ -1,4 +1,4 @@
-# shrinedogg/xo-mcp:1.4.4-node22
+# szkud/xo-mcp:1.4.4-node22
 #
 # Official @xen-orchestra/mcp 1.4.4 (Vates) baked onto the mcp-proxy base so
 # the bridge pod needs no init container and no staging volume. node 22 is
@@ -6,8 +6,8 @@
 # unlike node 26). Build + push happens on the laptop (the cluster cannot
 # build images):
 #
-#   docker buildx build --platform linux/amd64 -t docker.io/shrinedogg/xo-mcp:1.4.4-node22 .
-#   docker push docker.io/shrinedogg/xo-mcp:1.4.4-node22
+#   docker buildx build --platform linux/amd64 -t docker.io/szkud/xo-mcp:1.4.4-node22 .
+#   docker push docker.io/szkud/xo-mcp:1.4.4-node22
 #
 # The pod is the definitive gate for XO 6.5+ compatibility: on an older XO
 # the binary exits at startup with "Unable to verify MCP status (HTTP 404)".

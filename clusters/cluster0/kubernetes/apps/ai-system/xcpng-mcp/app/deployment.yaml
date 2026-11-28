@@ -1,7 +1,7 @@
 ---
 # Xen Orchestra MCP bridge: mcp-proxy (stdio -> streamable HTTP) running the
 # official @xen-orchestra/mcp 1.4.4 server as a node child. node 22, its
-# shared libs and node_modules are baked into shrinedogg/xo-mcp:1.4.4-node22
+# shared libs and node_modules are baked into szkud/xo-mcp:1.4.4-node22
 # (see Dockerfile next to this file), so no init container and no staging
 # volume.
 #
@@ -45,7 +45,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: xo-mcp-bridge
-          image: docker.io/shrinedogg/xo-mcp:1.4.4-node22
+          image: docker.io/szkud/xo-mcp:1.4.4-node22
           imagePullPolicy: IfNotPresent
           args:
             - --host=0.0.0.0
